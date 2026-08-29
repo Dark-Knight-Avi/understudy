@@ -36,3 +36,9 @@ strict = true
 warn_unreachable = true
 # ADR-0006: type hints are what keep the API schemas contracts rather than
 # documentation. Run this in the deploy step, not just locally.
+#
+# Every service owns a `tests` package, so a repo-wide run collides on the
+# duplicate module name and aborts before checking any source at all. Excluding
+# them keeps `mypy services/` meaningful; ruff still lints the tests, and the
+# tests themselves are fully annotated by convention.
+exclude = ["/tests/"]
