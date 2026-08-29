@@ -1,6 +1,9 @@
 # 12 — Retrieval & Rerank
 
-> **Pre-build draft.** Written ahead of the milestone; revise after it ships to describe what actually shipped.
+> **Reference / fallback design.** [ADR-0007](./adr/0007-adopt-ragflow-for-retrieval.md) adopts
+> RAGFlow instead of building this. Retained because it documents what we would build if the M1.5
+> spike fails, and because the relevance gate in [`12`](./12-retrieval-and-rerank.md) is reusable
+> as a wrapper in front of RAGFlow. Do not build from this without checking that ADR first.
 
 > The quality engine: hybrid search, fusion, cross-encoder reranking on CPU, and the relevance gate
 > that decides whether an answer is grounded or honestly labelled as not. This is where M5's value

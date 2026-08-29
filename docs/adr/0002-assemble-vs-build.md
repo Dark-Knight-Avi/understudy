@@ -1,6 +1,6 @@
 # ADR-0002 — Build three components; assemble everything else
 
-**Status:** Accepted
+**Status:** Accepted — **amended by [ADR-0007](./0007-adopt-ragflow-for-retrieval.md)**, which replaces the RAG service with RAGFlow. The build-vs-assemble principle stands; the count drops from three components to two.
 
 ## Context
 

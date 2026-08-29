@@ -55,10 +55,11 @@ revised after each ships so they describe what actually shipped rather than what
 |---|---|---|
 | **M0** | Spikes: measure before committing. **Everything gates on this** | Not started — **do this next** |
 | **M1** | Chat online — the team can log in and use it | Blocked on M0 |
+| **M1.5** | RAGFlow spike — adopt retrieval or build it ([ADR-0007](./adr/0007-adopt-ragflow-for-retrieval.md)) | Blocked on M1 |
 | **M2** | Coexistence — platform and user GPU jobs share machines safely | Blocked on M0/M1 |
 | **M3** | Coding — OpenCode + Cline on local models | Blocked |
 | **M4** | Deep tier — near-frontier models via CPU offload | Blocked on M0 spike 7 |
-| **M5** | RAG — grounded answers with citations | Blocked |
+| **M5** | RAG — integrate RAGFlow, gate wrapper if needed | Blocked on M1.5 |
 | **M6** | Tools — web search, PDF, PPTX via MCP | Blocked |
 | **M7** | Image generation | Blocked on `.149` Ubuntu approval |
 | **M8** | Hardening — SSO, backups, monitoring, egress proof | Blocked |

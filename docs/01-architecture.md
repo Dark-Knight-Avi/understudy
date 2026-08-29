@@ -29,7 +29,7 @@ person's job leaves unused. No fixed reservation, no cap on the user.
 This is the whole of [`03-gpu-sharing-policy.md`](./03-gpu-sharing-policy.md), and it is the
 requirement most likely to decide whether the platform survives contact with its users.
 
-### D3 — Build three things; assemble the rest
+### D3 — Build two things; assemble the rest
 
 Almost every capability on the list already exists as mature open-source software. What does not
 exist is *our* retrieval over *our* documents, one tool surface shared by every client, and an
@@ -37,9 +37,10 @@ arbiter that keeps the platform out of the way.
 
 | We build | We assemble |
 |---|---|
-| RAG service | LiteLLM (gateway) |
-| MCP tool server | Open WebUI (chat) |
-| Fleet controller | OpenCode (terminal agent) |
+| MCP tool server | LiteLLM (gateway) |
+| Fleet controller | RAGFlow (retrieval, [ADR-0007](./adr/0007-adopt-ragflow-for-retrieval.md)) |
+| | Open WebUI (chat) |
+| | OpenCode (terminal agent) |
 | | Cline / Roo Code (VS Code) |
 | | vLLM, `ik_llama.cpp` (inference) |
 | | SearXNG (search) |
@@ -80,7 +81,7 @@ what makes F10 achievable rather than a three-way reimplementation.
                                                            Postgres 17 + pgvector
                                                            LiteLLM / Open WebUI / Caddy / SearXNG
                                                            +------------------------------+
-                                                           | RAG service       WE BUILD   |
+                                                           | RAGFlow            adopted   |
                                                            | MCP tool server   WE BUILD   |
                                                            | Fleet controller  WE BUILD   |
                                                            +------------------------------+
@@ -100,9 +101,9 @@ any piece can be replaced without touching the others.
 | **vLLM** (`.226`, `.87`, `.149`) | Fast-tier generation, GPU-resident, continuous batching | Which model is loaded — the controller decides |
 | **ik_llama.cpp** (`.226`) | Deep-tier generation with experts in system RAM | Interactive latency |
 | **Infinity** (`.87`) | Embeddings on GPU | Reranking (that is CPU) |
-| **RAG service** | Ingestion, hybrid retrieval, reranking, the relevance gate, citation assembly. Exposed as an OpenAI-compatible *model* | Being an Open WebUI plugin |
+| **RAGFlow** | Upload UI, parsing, chunking, hybrid retrieval, reranking, citations. Registered in the gateway as an OpenAI-compatible *model* ([ADR-0007](./adr/0007-adopt-ragflow-for-retrieval.md)) | Being an Open WebUI plugin |
 | **MCP tool server** | One tool surface: `search_documents`, `web_search`, `generate_pdf`, `generate_pptx`, `generate_image` | The models |
-| **Postgres + pgvector** | Chunks, embeddings, full-text index, document metadata | Vector search *strategy* — that is the RAG service |
+| **Postgres + pgvector** | Platform state. RAGFlow brings its own store, so this is no longer the chunk index unless the M1.5 spike fails | Vector search *strategy* — that is RAGFlow |
 | **Open WebUI** | Accounts, chat history, model picker, admin | Retrieval, tools |
 | **Caddy** | TLS on the LAN, one entry point | Auth decisions |
 

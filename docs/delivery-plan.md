@@ -10,8 +10,10 @@
 
 ## 1. How we work
 
-**Roles.** You write all service code and run all commands on the hosts. I write `docs/**`,
-configuration examples, schemas, and step-by-step build instructions with the reasoning behind them.
+**Roles.** I write the code and the docs; you run everything that touches the hosts — installs,
+GPU work, deploys, and the M0 measurements. That split follows the hardware: I cannot reach the
+machines, and the measurements are the part no one can guess.
+
 Each milestone produces working software *and* the doc describing what actually shipped — written
 after, not before, so it records reality.
 
@@ -30,22 +32,22 @@ Nothing is built for months in isolation.
 
 ## 2. Repository layout
 
-One repo, three services, per-host deploy configs:
+One repo, two services, per-host deploy configs:
 
 ```
 ai-platform/
   docs/                      # this folder
   services/
-    rag/                     # FastAPI, OpenAI-compatible; ingestion + retrieval
     mcp-tools/               # FastMCP; search, pdf, pptx, image
     fleet-controller/        # FastAPI + single-page dashboard
+    #  retrieval is RAGFlow, adopted -- see adr/0007
   deploy/
     common/
       compose.base.yaml
     host-226/                # vLLM, ik_llama.cpp, .wslconfig
       compose.yaml
       .env.example
-    host-87/                 # postgres, litellm, open-webui, caddy, searxng, infinity, our 3 services
+    host-87/                 # postgres, litellm, open-webui, caddy, searxng, ragflow, our 2 services
       compose.yaml
       .env.example
     host-149/                # comfyui
@@ -70,9 +72,9 @@ about at 3 a.m. than one file with conditional profiles.
 
 There is no staging hardware. Everything runs on machines people use. Three rules resolve this:
 
-**Rule 1 — develop off-host.** The three services we build are thin and network-bound: they call the
-gateway, Postgres and the embeddings server over HTTP. So develop them **on your own machine**,
-pointed at the real backends:
+**Rule 1 — develop off-host.** Both services we build are thin and network-bound: they call the
+gateway, RAGFlow and Postgres over HTTP. So develop them **on a normal machine**, pointed at the
+real backends:
 
 ```
 DATABASE_URL=postgresql://...@10.0.0.87:5432/aiplatform_dev
@@ -159,16 +161,17 @@ Effort assumes focused days. Part-time, multiply by two to three.
 |---|---|---|---|---|---|---|
 | **M0** | Spikes | all 3 | Run [`04-m0-spikes.md`](./04-m0-spikes.md) | Results recorded, design adjusted | Spikes 1–4 pass or have a recorded workaround | 1–2 d |
 | **M1** | Chat online | `.87`, `.226` | Host setup, Postgres, LiteLLM, vLLM, Open WebUI, Caddy | `05-host-setup`, `06-model-gateway`, `07-inference-servers` | A colleague logs in from their own machine and chats; TTFT < 2 s | 2–3 d |
+| **M1.5** | **RAGFlow spike** | `.87` | Install RAGFlow, point at the gateway, run the eval set | ADR-0007 verdict | Refusal, per-user isolation, MCP reachability — all three pass | **1 d** |
 | **M2** | Coexistence | `.87`, `.226` | **Fleet controller** + dashboard toggle, `gpu-run` | `08-fleet-controller` | All 8 tests in [`03-gpu-sharing-policy.md`](./03-gpu-sharing-policy.md) §7 | 4–6 d |
 | **M3** | Coding | `.226` | OpenCode + Cline config; context tuning | `09-coding-agents` | A real task completed end-to-end in both clients | 2–3 d |
 | **M4** | Deep tier | `.226` | `ik_llama.cpp`, 235B weights, gating on modelling state | `07-inference-servers` §deep | Deep model in the catalog; modelling runs unaffected | 3–5 d |
-| **M5** | RAG | `.87` | Schema, ingestion, hybrid search, rerank, **RAG service** | `10`–`13` | Cited answers; recall@5 measured before/after rerank | 8–12 d |
+| **M5** | RAG | `.87` | Integrate RAGFlow; relevance-gate wrapper only if the spike needs it | ADR-0007, `12` if wrapping | Cited answers; recall@5 on the eval set | **2–4 d** (12 d if the spike fails) |
 | **M6** | Tools | `.87` | **MCP server**: search, PDF, PPTX; SearXNG | `14`, `15`, `16` | One tool invoked from all three clients | 4–6 d |
 | **M7** | Image | `.149` | Ubuntu, ComfyUI, FLUX.1-schnell, MCP tool | `15` §image | Image generated from chat and terminal | 2–3 d |
 | **M8** | Hardening | all 3 | Backups, monitoring, egress lockdown, boot resilience | `17`, `18` | Egress proof; reboot test; eval set green | 4–6 d |
 
-**Total: roughly 6–9 focused weeks.** M5 is a third of it and is where the differentiated value is —
-resist the urge to rush it after the quick wins of M1–M3.
+**Total: roughly 4–6 focused weeks** with RAGFlow adopted; 6–9 if the M1.5 spike fails and M5 is
+built. That single day of spiking is the highest-leverage hour in the plan.
 
 ### Why this order
 

@@ -1,6 +1,9 @@
 # 10 — Data Layer
 
-> **Pre-build draft.** Written ahead of the milestone; revise after it ships to describe what actually shipped.
+> **Reference / fallback design.** [ADR-0007](./adr/0007-adopt-ragflow-for-retrieval.md) adopts
+> RAGFlow instead of building this. Retained because it documents what we would build if the M1.5
+> spike fails, and because the relevance gate in [`12`](./12-retrieval-and-rerank.md) is reusable
+> as a wrapper in front of RAGFlow. Do not build from this without checking that ADR first.
 
 > Postgres 17 + pgvector on `.87`: the schema, the one config constant that must never drift, the
 > index choice, the hybrid search query, migrations, and backups. This is the foundation the rest of

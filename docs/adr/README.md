@@ -15,8 +15,9 @@ argue against.
 | ADR | Status | Decision |
 |---|---|---|
 | [0001](./0001-partition-by-service.md) | Accepted | Partition the fleet by service; do not cluster the GPUs |
-| [0002](./0002-assemble-vs-build.md) | Accepted | Build three components; assemble everything else from open source |
+| [0002](./0002-assemble-vs-build.md) | Amended by [0007](./0007-adopt-ragflow-for-retrieval.md) | Build three components; assemble everything else from open source |
 | [0003](./0003-model-tiers-and-ladder.md) | Accepted | Two quality tiers, and an elastic model ladder driven by measured free VRAM |
 | [0004](./0004-egress-policy.md) | Accepted | Search queries may leave the network; documents and code never do |
 | [0005](./0005-rag-as-a-model-endpoint.md) | Accepted | Expose the RAG service as an OpenAI-compatible model, not as a chat-UI plugin |
-| [0006](./0006-python-for-our-services.md) | Accepted | Python + FastAPI for the RAG service, MCP tool server and fleet controller |
+| [0006](./0006-python-for-our-services.md) | Accepted | Python + FastAPI for the MCP tool server and fleet controller |
+| [0007](./0007-adopt-ragflow-for-retrieval.md) | Accepted | Adopt RAGFlow for retrieval instead of building it; amends 0002 |
