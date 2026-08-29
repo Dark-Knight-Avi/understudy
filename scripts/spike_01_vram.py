@@ -45,14 +45,34 @@ def probe() -> dict[str, object]:
     capability = torch.cuda.get_device_capability(0)
     free, total = torch.cuda.mem_get_info()
 
-    # Allocate until the driver refuses. This is the number that matters: what the
-    # runtime reports as free and what it will actually hand over are not the same.
+    # Allocate until the driver stops giving us real VRAM.
+    #
+    # "Until it raises OOM" is NOT the test, and assuming it was produced a
+    # measured 226 GiB on a 24 GB card. On WSL2 the driver's system-memory
+    # fallback silently spills allocations into host RAM rather than failing, so
+    # the loop runs until it has eaten the machine. A host with 256 GB of RAM
+    # will happily report ten times its VRAM.
+    #
+    # The authority is the driver's own free-memory counter: keep allocating only
+    # while `mem_get_info` shows free VRAM actually dropping by roughly what we
+    # asked for. The moment it stops dropping, we have left the card.
     blocks: list[object] = []
-    try:
-        while True:
+    fallback_detected = False
+    hard_cap = int(total * 1.10)  # nothing legitimate can exceed the card
+
+    while len(blocks) * CHUNK_BYTES < hard_cap:
+        before, _ = torch.cuda.mem_get_info()
+        try:
             blocks.append(torch.empty(CHUNK_BYTES, dtype=torch.uint8, device="cuda"))
-    except (RuntimeError, torch.cuda.OutOfMemoryError):
-        pass
+        except (RuntimeError, torch.cuda.OutOfMemoryError):
+            break
+        after, _ = torch.cuda.mem_get_info()
+        # Allow slack for the allocator's own bookkeeping, but a chunk that costs
+        # the card almost nothing came from somewhere else.
+        if (before - after) < CHUNK_BYTES // 2:
+            blocks.pop()
+            fallback_detected = True
+            break
 
     allocated = len(blocks) * CHUNK_BYTES
     del blocks
@@ -70,12 +90,17 @@ def probe() -> dict[str, object]:
         "reported_free_gib": round(free / gib, 2),
         "actually_allocatable_gib": round(allocated / gib, 2),
         "overhead_gib": round((total - allocated) / gib, 2),
+        "system_memory_fallback": fallback_detected,
     }
 
 
 def verdict(r: dict[str, object]) -> str:
     alloc = float(r["actually_allocatable_gib"])  # type: ignore[arg-type]
     total = float(r["total_gib"])  # type: ignore[arg-type]
+    if alloc > total:
+        # Should now be unreachable, but if it ever fires the number is fiction
+        # and must never reach the ladder.
+        return "INVALID (allocated more than the card holds -- fallback not caught)"
     # Thresholds in docs/04 are written for the 24 GB card; scale for the others.
     if total >= 22:  # .226, RTX 4090
         if alloc >= 21:
@@ -101,6 +126,15 @@ def main() -> None:
     print(f"ACTUALLY ALLOCATABLE {r['actually_allocatable_gib']} GiB")
     print(f"overhead             {r['overhead_gib']} GiB")
     print(f"VERDICT              {r['verdict']}")
+    if r["system_memory_fallback"]:
+        print(
+            "\nNOTE: system-memory fallback was hit, and the probe stopped at the"
+            "\ncard's real limit. The figure above is true VRAM."
+            "\n"
+            "\nIt also means CUDA on this host spills into system RAM rather than"
+            "\nraising OOM, so an oversized model runs pathologically slowly instead"
+            "\nof failing fast. Worth knowing before blaming the model."
+        )
 
     if r["verdict"] == "HARD FAIL":
         print("\nSee docs/04-m0-spikes.md spike 1. Do not build the ladder on this.")
