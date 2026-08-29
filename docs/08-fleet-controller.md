@@ -817,7 +817,7 @@ it costs nothing to adopt.
 # scripts/gpu-run - claim this host's GPU, run a command, release it.
 set -uo pipefail
 
-: "${FLEET_URL:=http://10.0.0.87:8088}"
+: "${FLEET_URL:=http://10.0.0.87:8090}"
 : "${FLEET_HOST_ID:=226}"
 : "${GPU_RUN_TIMEOUT:=120}"
 

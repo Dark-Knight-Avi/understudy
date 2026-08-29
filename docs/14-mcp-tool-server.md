@@ -2,6 +2,11 @@
 
 > **Pre-build draft.** Written ahead of the milestone; revise after it ships to describe what actually shipped.
 
+> **Corrected during the build:** the `mcp` SDK renamed `FastMCP` to `MCPServer` in 2.1.1, and the old
+> `mcp.server.fastmcp` import now raises with a migration pointer. Read every `FastMCP` reference below
+> as `MCPServer`. The port is **8002** on the host (container 8080) -- publishing 8080 as written here
+> collides with Open WebUI on `.87`. See [`ports.md`](./ports.md).
+
 > One tool surface for every client. This is the piece that turns F10 from a three-way
 > reimplementation into a single service. Milestone **M6**, hosted on `.87`.
 > Read [`01-architecture.md`](./01-architecture.md) §1 D3 first — this document is that decision,

@@ -46,6 +46,7 @@ revised after each ships so they describe what actually shipped rather than what
 | [`17-evaluation.md`](./17-evaluation.md) | M8 | Eval set, recall@k, gate calibration, groundedness |
 | [`18-operations.md`](./18-operations.md) | M8 | Backups, boot resilience, monitoring, runbook |
 | [`delivery-plan.md`](./delivery-plan.md) | — | How this gets built and deployed: sequencing, per-host bring-up, release mechanics, rollback |
+| [`ports.md`](./ports.md) | — | **Authoritative** port allocation. Wins over any numbered doc |
 | [`tech-stack.md`](./tech-stack.md) | — | Every stack choice with tradeoffs, alternatives, and **licence gotchas** |
 | [`adr/`](./adr/) | — | Architecture Decision Records — the *why* behind each choice |
 
