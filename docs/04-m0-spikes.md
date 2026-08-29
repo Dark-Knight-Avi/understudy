@@ -263,6 +263,14 @@ Accepted as DEGRADED rather than chased. `.210`'s work is kilobyte-scale API cal
 carries thousands per second. The only real cost is a first Docker pull from the
 registry taking ~10 minutes instead of one. Worth a cable swap, not worth a day.
 
+**The subnets are `/23`, not `/24`, and one host uses `eth1`.** `10.72.32.0/23`
+carries `.226` and `.87`; `10.72.18.0/23` carries `.210`. Every firewall rule
+drafted before M0 used `/24` and would have covered half the address space while
+appearing correct. Nothing lives in the missing halves today, which is precisely
+why it would have surfaced months later as one machine that could not reach the
+fleet. Also: `ip addr show eth0` returns nothing on `.226` — its interface is
+`eth1`, so any script hardcoding `eth0` fails silently there.
+
 **ICMP is filtered fleet-wide.** Every host drops ping while answering TCP
 perfectly. Any reachability check that treats a failed ping as failure will report
 healthy hosts as dead — spike 4's original version did exactly that.

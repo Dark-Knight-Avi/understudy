@@ -73,7 +73,10 @@ Each Windows host needs **two** rules per port set, not one — confirmed on `.2
 
 Layer 1 alone leaves every service unreachable *even from its own host*, while the rules
 look correct in the UI. Recipe and diagnosis in [`05-host-setup.md`](./05-host-setup.md) §9.
-Scope both to the internal subnets only — `10.0.0.0/24` and `10.0.1.0/24`.
+Scope both to the internal subnets only — and **derive the prefix from each host
+rather than assuming `/24`**. Ours are `/23`; a `/24` rule covers half the subnet
+and looks correct doing it. `ip -4 addr | grep inet` on each host, and read the
+network off the broadcast address.
 
 The fleet agent port (8099) is the one most likely to be missed, because it is the only
 port a host exposes *for the platform's own benefit* rather than for a user-facing service.

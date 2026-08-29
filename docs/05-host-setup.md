@@ -647,6 +647,19 @@ New-NetFirewallHyperVRule -Name 'Understudy' -DisplayName 'Understudy' `
 
 Trim `$ports` to what each host actually publishes ([`ports.md`](./ports.md)).
 
+**Use each host's REAL prefix, not the `/24` written above.** Our subnets turned out
+to be `/23`, so a `/24` rule silently covers half the address space it should — and
+looks entirely correct while doing it. Check before writing any rule:
+
+```bash
+ip -4 addr | grep -E "inet |^[0-9]"     # NOT `show eth0`: one host uses eth1
+```
+
+Read the network off the broadcast address: `10.72.32.87/23 brd 10.72.33.255` means
+the network is `10.72.32.0/23`, and `10.72.19.210/23 brd 10.72.19.255` means
+`10.72.18.0/23`. Nothing lives in the missing halves today, which is exactly why
+this would go unnoticed until a machine is placed there.
+
 **Why this matters more than it looks.** Every platform service runs inside WSL2. Configure layer 1
 alone and you get three hosts whose firewall rules look right in the UI, whose services are running,
 and which cannot reach each other at all — the gateway sees no backends, every host reads `UNKNOWN`,
