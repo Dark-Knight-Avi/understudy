@@ -65,9 +65,15 @@ and ComfyUI moves off `.226`.
 
 ## Firewall
 
-Windows Firewall on each host must allow its published ports **from the internal subnets
-only** — `10.0.0.0/24` and `10.0.1.0/24`. Under WSL2 mirrored networking there is a
-Hyper-V firewall layer as well; see [`05-host-setup.md`](./05-host-setup.md).
+Each Windows host needs **two** rules per port set, not one — confirmed on `.210` during M0:
+
+1. `New-NetFirewallRule` — Windows Firewall
+2. `New-NetFirewallHyperVRule` with the WSL `VMCreatorId` — the Hyper-V layer that actually
+   gates WSL2 under mirrored networking
+
+Layer 1 alone leaves every service unreachable *even from its own host*, while the rules
+look correct in the UI. Recipe and diagnosis in [`05-host-setup.md`](./05-host-setup.md) §9.
+Scope both to the internal subnets only — `10.0.0.0/24` and `10.0.1.0/24`.
 
 The fleet agent port (8099) is the one most likely to be missed, because it is the only
 port a host exposes *for the platform's own benefit* rather than for a user-facing service.

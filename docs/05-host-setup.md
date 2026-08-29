@@ -614,14 +614,44 @@ New-NetFirewallRule -DisplayName 'AI Platform - internal services' -Direction In
   -RemoteAddress 10.0.0.0/24,10.0.1.0/24
 ```
 
-**Mirrored networking adds a second firewall.** With `networkingMode=mirrored` and `firewall=true`,
-inbound traffic to the WSL2 instance is also filtered by Hyper-V firewall policy, and its default
-inbound action can block LAN clients even when the Windows rules above allow them. If a service is
-reachable from its own host but not from another machine, check that first —
-`Get-NetFirewallHyperVVMSetting` and `Get-NetFirewallHyperVRule` are the cmdlets to look at, and the
-WSL VM is identified by a fixed GUID. **Verify the cmdlet names, parameters and that GUID against
-your Windows build**; this surface is newer than the rest of this document and the syntax has moved
-between releases.
+### Mirrored networking adds a SECOND firewall — confirmed, not theoretical
+
+**The rules above are not sufficient.** With `networkingMode=mirrored`, inbound traffic to WSL2 is
+also filtered by Hyper-V firewall policy, which `New-NetFirewallRule` does not touch. Verified on
+`.210` during M0: a service listening inside WSL2 was unreachable even from **its own host**, with
+correct-looking Windows Firewall rules in place.
+
+The symptom is distinctive and easy to misread:
+
+```powershell
+Test-NetConnection <host-ip> -Port <port>
+#   PingSucceeded    : True        <- the machine is fine
+#   TcpTestSucceeded : False       <- ...but WSL2 is walled off
+```
+
+Run **both** layers, every time:
+
+```powershell
+$wsl   = '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}'   # confirm: Get-NetFirewallHyperVVMCreator
+$ports = 80,443,4000,5000,5432,7997,7998,8000,8001,8002,8081,8090,8099,8188,8888,9380
+
+# Layer 1 -- Windows Firewall
+New-NetFirewallRule -DisplayName 'Understudy' -Direction Inbound -Action Allow `
+  -Protocol TCP -LocalPort $ports -RemoteAddress 10.0.0.0/24,10.0.1.0/24
+
+# Layer 2 -- Hyper-V firewall. This is the one that actually gates WSL2.
+New-NetFirewallHyperVRule -Name 'Understudy' -DisplayName 'Understudy' `
+  -Direction Inbound -VMCreatorId $wsl -Protocol TCP `
+  -LocalPorts ($ports -join ',') -Action Allow
+```
+
+Trim `$ports` to what each host actually publishes ([`ports.md`](./ports.md)).
+
+**Why this matters more than it looks.** Every platform service runs inside WSL2. Configure layer 1
+alone and you get three hosts whose firewall rules look right in the UI, whose services are running,
+and which cannot reach each other at all — the gateway sees no backends, every host reads `UNKNOWN`,
+and nothing in the logs points at the firewall. M0 found it with `iperf3`; without that it would have
+cost a confusing day at M1.
 
 ### `.149`
 
