@@ -1,0 +1,27 @@
+# Secrets - never commit
+.env
+.env.*
+!.env.example
+secrets/
+*.key
+*.pem
+credentials*
+
+# Model weights
+models/
+*.gguf
+*.safetensors
+
+# Data
+data/
+postgres-data/
+documents/
+outputs/
+
+# Runtime
+__pycache__/
+*.pyc
+.venv/
+venv/
+node_modules/
+*.log
