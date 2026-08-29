@@ -1,0 +1,6 @@
+# Scripts deploy to WSL2/Ubuntu hosts -- CRLF would break the shebang.
+* text=auto eol=lf
+*.sh text eol=lf
+*.md text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
