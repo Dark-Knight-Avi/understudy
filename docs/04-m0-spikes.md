@@ -252,6 +252,22 @@ it will crawl over PCIe. Check for spill before blaming a model for being slow.
 nominal one.** Nominal 24.0 would let the config validator accept a 21 GB rung that
 can never load. Use 22.5 for `.226` and 10.75 for `.210`.
 
+**Driver version is a per-host fact, not a fleet assumption.** `.87` was on
+560.94 (CUDA 12.6) while `.226` and `.210` were on 580+ (CUDA 13.x). The cu130
+PyTorch build segfaulted on import there — `exit=139`, no message, because a
+failure during CUDA init aborts rather than raising. `nvidia-smi` worked
+throughout, since it talks to the driver and not the CUDA runtime, which makes
+this look like a broken venv rather than a driver mismatch.
+
+A cu126 build unblocked the measurement, but it is a stopgap: the next `uv sync`
+restores cu130 and re-breaks it, and M1 would need separate container images for
+that one host. **Update `.87`'s driver to 580+ before M1**, and add "check driver
+version" to per-host setup.
+
+**Measured allocatable, not nominal, belongs in `total_vram_gb`.**
+`.226` 22.5, `.87` 10.75, `.210` 10.75. Nominal figures would let the config
+validator accept a rung the card can never actually load.
+
 **It also caught a live bug.** The `ready` check demanded free VRAM within 1 GB of
 nominal total — unreachable once 1.49 GiB is permanently held — so the toggle could
 never have reported ready. Fixed in commit 661ec1b. This is the case for measuring
@@ -265,6 +281,7 @@ before building, made concretely.
 |---|---|---|---|---|---|
 | 1 | `.226` usable VRAM | GiB allocatable | >= 21 | **22.50** (of 23.99; 1.49 overhead) | **PASS** |
 | 1b | `.210` usable VRAM | GiB allocatable, during a normal working day | measured | **10.75** (of 11.99; 1.24 overhead) | **PASS** — but taken while the card was idle; re-read under real use |
+| 1c | `.87` usable VRAM | GiB allocatable | measured | **10.75** (of 11.99; 1.24 overhead) | **PASS** |
 | 2 | `.226` CUDA soak | 2 h clean | pass | | |
 | 3 | `.149` Blackwell *(optional)* | `sm_120` present | pass | | |
 | 4 | Cross-subnet link `.149` | Mbit/s, latency | >= 500, < 5 ms | | |
