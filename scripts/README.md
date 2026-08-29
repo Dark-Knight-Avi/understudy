@@ -8,11 +8,15 @@ building anything on top.
 
 ## Setup, on each host
 
+> **Do not run a bare `uv sync` afterwards.** It is exact by default and will
+> uninstall the ~2.5 GB CUDA PyTorch this pulls in. Use the command below, or
+> `make setup-spikes`, which passes `--inexact`.
+
 ```bash
 # once per host, inside WSL2 on .226 and .87; natively on .149
 curl -LsSf https://astral.sh/uv/install.sh | sh
 git clone <this repo> && cd ai-platform
-uv sync --group spikes
+uv sync --all-packages --group dev --group spikes --inexact
 ```
 
 Inside WSL2, install **only the CUDA toolkit** — never a Linux NVIDIA driver. The driver passes

@@ -16,13 +16,17 @@ help:  ## show this help
 
 # ---------------------------------------------------------------- development
 
+# `uv sync` is EXACT by default: it uninstalls anything outside the requested
+# groups. Switching between these two targets without --inexact throws away the
+# ~2.5 GB CUDA PyTorch download every time, so both keep what the other installed.
+
 .PHONY: setup
 setup:  ## dev machine: services + tooling, no CUDA torch
-	uv sync --all-packages --group dev
+	uv sync --all-packages --group dev --inexact
 
 .PHONY: setup-spikes
-setup-spikes:  ## hosts only: adds PyTorch w/ CUDA (~2.5 GB) for the M0 spikes
-	uv sync --all-packages --group spikes
+setup-spikes:  ## hosts: dev tooling PLUS PyTorch w/ CUDA (~2.5 GB) for the M0 spikes
+	uv sync --all-packages --group dev --group spikes --inexact
 
 .PHONY: lint
 lint:  ## ruff + mypy
