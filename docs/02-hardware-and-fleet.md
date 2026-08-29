@@ -7,19 +7,20 @@
 
 ## 1. The fleet
 
-| | `.226` | `.87` | `.149` |
-|---|---|---|---|
-| **Role** | Fast tier + deep tier | Hub: services, embeddings | Image generation |
-| **GPU** | RTX 4090, **24 GB** | RTX 4070, **12 GB** | RTX 5080, **16 GB** |
-| **Arch / CC** | Ada, 8.9 | Ada, 8.9 | **Blackwell, 12.0** |
-| **CUDA** | 13.1 | 12.6 | 13.1 |
-| **CPU** | TR PRO 9975WX, 32c/64t | i9-14900K, 24c/32t | i9-14900K, 24c/32t |
-| **RAM** | **256 GB DDR5-5600, 8-channel** | 128 GB DDR5-4000 | 32 GB DDR5-5600 |
-| **Storage** | 8 TB + 2x4 TB NVMe | 2x2 TB NVMe | 2 TB NVMe |
-| **OS** | Windows + WSL2/Ubuntu | Windows + WSL2/Ubuntu | Windows, **no WSL yet** |
-| **Also used for** | Long long-running simulation runs | Light | Lab workstation |
+| | `.226` | `.87` | `.149` | `.210` |
+|---|---|---|---|---|
+| **Role** | Fast tier + deep tier | Hub: services, embeddings | Image generation | Overflow + embeddings failover |
+| **GPU** | RTX 4090, **24 GB** | RTX 4070, **12 GB** | RTX 5080, **16 GB** | RTX 4070, **12 GB** |
+| **Arch / CC** | Ada, 8.9 | Ada, 8.9 | **Blackwell, 12.0** | Ada, 8.9 |
+| **CUDA** | 13.1 | 12.6 | 13.1 | 13.1 |
+| **CPU** | TR PRO 9975WX, 32c/64t | i9-14900K, 24c/32t | i9-14900K, 24c/32t | i9-14900K, 24c/32t |
+| **RAM** | **256 GB DDR5-5600** | 128 GB DDR5-4000 | 32 GB DDR5-5600 | 96 GB DDR5-4000 |
+| **Storage** | 8 TB + 2x4 TB NVMe | 2x2 TB NVMe | 2 TB NVMe | 2x2 TB NVMe |
+| **OS** | Windows + WSL2/Ubuntu | Windows + WSL2/Ubuntu | Windows, **no WSL yet** | Windows + WSL2/Ubuntu |
+| **Also used for** | Long long-running simulation runs | Light | Lab workstation | **Someone's daily workstation** |
 
-Total: **52 GB VRAM**, **416 GB RAM**, three separate machines on 1 GbE, two subnets.
+Total: **64 GB VRAM**, **512 GB RAM**, four separate machines on 1 GbE, two subnets
+(`10.0.0.x` and `10.0.1.x`).
 
 ### Why each host has the role it does
 
@@ -34,6 +35,18 @@ it is where anything that must stay up belongs.
 
 **`.149` does image generation.** 32 GB of system RAM rules out hosting data services, and it sits on
 another subnet. Image generation is bursty, self-contained, and tolerates both.
+
+**`.210` is elastic overflow, and deliberately holds nothing critical.** It is assigned to a named
+person and is their daily machine, which makes it the least reliable host in the fleet -- not because
+of its hardware, but because its owner has first claim on it and will exercise that claim without
+warning. So it gets work that can vanish mid-flight: burst chat capacity, and a **GPU replica of the
+embeddings service**. That replica is the real prize. Embeddings are the one thing that must never
+die, and until now their only fallback was CPU on `.87`; a second GPU copy turns a degraded fallback
+into a proper failover.
+
+What it must *not* get is the deep tier. Its 96 GB could hold a mid-size MoE, but CPU offload is
+memory-bandwidth-hungry and would make the machine sluggish for the person sitting at it -- which is
+exactly the outcome the sharing policy exists to prevent.
 
 ### Two hardware facts that change decisions
 

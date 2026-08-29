@@ -75,8 +75,9 @@ remove:  ## full removal -- returns the host to a plain workstation
 
 .PHONY: secrets-scan
 secrets-scan:  ## fail if credentials look committed
+	@# Scans only git-tracked files -- what would actually be committed. Scanning the
+	@# worktree instead matches .venv and every vendored library that mentions a password.
 	@# Patterns use character classes (c[i]stup) so this rule does not match itself.
-	@! grep -rniE 'c[i]stup@|passw[o]rd[[:space:]]*[:=][[:space:]]*[^ $$]' \
-	    --include='*' --exclude-dir=.git --exclude-dir=results . \
+	@! git ls-files -z | xargs -0 grep -niE 'c[i]stup@|passw[o]rd[[:space:]]*[:=][[:space:]]*[^ $$]' \
 	  || { echo "POSSIBLE CREDENTIAL FOUND -- do not commit"; exit 1; }
 	@echo "clean"

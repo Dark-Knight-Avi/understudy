@@ -96,6 +96,17 @@ query fails. The CPU fallback exists so that outcome is impossible — which is 
 no special exemption from the headroom rule. Losing them costs us latency; starving the user's job
 costs them a day.
 
+### `.210` — RTX 4070, 12 GB (someone's daily workstation)
+
+| Free VRAM | Platform loads |
+|---|---|
+| >= 8.5 GB | Embeddings replica (~1.2 GB) + Qwen3-8B Int4 (~5.5 GB) |
+| 4.2–8.5 GB | Embeddings replica only |
+| < 4.2 GB | Nothing |
+
+Treat this host as the strictest case. Its owner has first claim, uses it daily, and did not ask for
+a platform to live on it. Prefer demoting early here over squeezing an extra rung.
+
 ### `.149` — RTX 5080, 16 GB
 
 ComfyUI has **no sleep mode**, and its VRAM use is transient — it allocates per job and releases
@@ -110,8 +121,10 @@ VRAM when a request arrives and refuse or downgrade it there.
 
 ### Why this is safe overall
 
-All three hosts are rarely claimed at once. With the gateway aware of every host's state, there is
-almost always somewhere to route — which is what turns contention from an outage into a capacity dip.
+All four hosts are rarely claimed at once, and the odds improve with every host added. With the
+gateway aware of every host's state there is almost always somewhere to route — which is what turns
+contention from an outage into a capacity dip. The fourth host also gives embeddings a real GPU
+failover rather than only a CPU one.
 
 ---
 
@@ -134,6 +147,9 @@ declare, no quota to reason about.
 
    .149  RTX 5080   ########......  12.0 / 16 GB   FLUX.1-schnell
                     I'm using this  ( o--)
+
+   .210  RTX 4070   ####..........   5.5 / 12 GB   embeddings + Qwen3-8B
+                    I'm using this  ( o--)              a colleague's machine
 ```
 
 **The status line is the entire point.** Nobody should have to guess whether the VRAM is actually

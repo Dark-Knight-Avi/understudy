@@ -113,7 +113,7 @@ it — do not attempt to work around this with `TORCH_CUDA_ARCH_LIST` hacks.
 
 ---
 
-## Spike 4 — Network: can `.149` talk to `.32.x`?
+## Spike 4 — Network: can the `.19` hosts talk to `.32.x`?
 
 The whole three-host design assumes it can. Verify before designing around it.
 
@@ -127,6 +127,12 @@ iperf3 -s                      # on .149
 iperf3 -c 10.0.1.149 -t 30   # from .87
 iperf3 -c 10.0.1.149 -t 30 -R
 ```
+
+Run it for **both** `.19` hosts: `10.0.1.149` and `10.0.1.210`.
+
+> **ICMP is filtered on some of these hosts.** A failed ping is not a failed spike — the script
+> treats TCP as authoritative. Early probing from the dev laptop already showed all four hosts
+> reachable, so the cross-subnet assumption looks safe; bandwidth is the open question.
 
 **Pass:** reachable, latency < 5 ms, >= 500 Mbit/s both ways.
 **Degraded:** reachable but slow — keep `.149` for image generation only (large payloads are rare and
@@ -234,9 +240,11 @@ shipping something nobody wants to wait for.
 | # | Spike | Metric | Target | Measured | Verdict |
 |---|---|---|---|---|---|
 | 1 | `.226` usable VRAM | GiB allocatable | >= 21 | | |
+| 1b | `.210` usable VRAM | GiB allocatable, during a normal working day | measured | | |
 | 2 | `.226` CUDA soak | 2 h clean | pass | | |
 | 3 | `.149` Blackwell | `sm_120` present | pass | | |
-| 4 | Cross-subnet link | Mbit/s, latency | >= 500, < 5 ms | | |
+| 4 | Cross-subnet link `.149` | Mbit/s, latency | >= 500, < 5 ms | | |
+| 4b | Cross-subnet link `.210` | Mbit/s, latency | >= 500, < 5 ms | | |
 | 5 | Workload peak VRAM | GB | bounded + known | | |
 | 5b | Workload frequency | blocks/day | occasional | | |
 | 6 | Demotion latency | seconds | <= 10 | | |
