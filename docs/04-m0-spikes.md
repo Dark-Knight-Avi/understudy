@@ -263,5 +263,5 @@ invalidate a design assumption that would otherwise be discovered in week six, a
 been told the platform is coming. Every spike above is written so that failing it produces a concrete
 alternative rather than a dead end.
 
-**Next:** M1 — [`06-model-gateway.md`](./06-model-gateway.md) and
+**Next:** M1 — [`05-host-setup.md`](./05-host-setup.md), [`06-model-gateway.md`](./06-model-gateway.md) and
 [`07-inference-servers.md`](./07-inference-servers.md), written as they are built.

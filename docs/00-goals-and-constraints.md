@@ -49,13 +49,13 @@ These are the ones with numbers, because "fast" and "secure" can't fail a test.
 
 | | Requirement | How it's verified |
 |---|---|---|
-| **N1** | **No document text or source code leaves the network.** Search queries may | Packet capture with egress blocked except SearXNG (`15-web-search-and-egress.md`) |
+| **N1** | **No document text or source code leaves the network.** Search queries may | Packet capture with egress blocked except SearXNG (`16-web-search-and-egress.md`) |
 | **N2** | **Zero recurring cost.** No paid API, no per-seat licence, no metered service | Inspect the dependency and service list |
 | **N3** | Time to first token **< 2 s** on the fast tier, warm | Benchmarked at 1, 2 and 4 concurrent streams |
 | **N4** | Supports **10 seats, 2–4 concurrent generations** without queueing on the fast tier | Load test |
 | **N5** | **A direct user of a workstation is never blocked by the platform.** They take as much GPU as they need; the platform runs on the remainder | The toggle tests in `03-gpu-sharing-policy.md` |
 | **N6** | The existing long-running simulation runs are **not measurably slowed** | Per-iteration time stays within noise of its ~48 min baseline |
-| **N7** | Retrieval quality is **measured, not felt** — recall@5 tracked on a fixed eval set | `16-evaluation.md` |
+| **N7** | Retrieval quality is **measured, not felt** — recall@5 tracked on a fixed eval set | `17-evaluation.md` |
 | **N8** | Every service returns after a host reboot with **no manual intervention** | Reboot test |
 | **N9** | Model choice is **swappable** — changing a model is config, not code | Change the catalog entry, restart, no source edits |
 

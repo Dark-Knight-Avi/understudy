@@ -31,7 +31,8 @@ is strictly better — provided yielding is reliable, which is the rest of this 
 |---|---|---|
 | **Free** | No foreign CUDA process | Top rung — largest model that fits, ~1 GB margin |
 | **Yielding** | Toggle flipped, or a foreign process appears | Sleep to zero within seconds; gateway reroutes |
-| **Sharing** | ~60 s after the user's job settles | Measure actual free VRAM; load the largest rung that fits, leaving ~3 GB headroom |
+| **Sharing** | ~60 s after the user's job settles | Measure actual free VRAM; load the largest rung that fits, leaving >= 3 GB headroom |
+| **Unknown** | Host unreachable, or `nvidia-smi` unparseable | Hold current state, **never promote**. Absence of evidence is not evidence of a free GPU |
 
 ### The 60-second settle is not padding
 
@@ -44,11 +45,33 @@ re-measure continuously, and drop a rung whenever their usage grows.
 cost of being wrong is not symmetric — a slightly smaller model is an inconvenience, someone's
 eight-hour run dying at hour six is not.
 
+**A rung change is a model swap, not a sleep.** Sleep/wake keeps one model's weights in RAM; moving
+between rungs loads a *different* model, which means a server restart on that host. So continuity
+during a rung change depends on **gateway failover to another host**, not on sleep mode. Configure
+that failover before building the ladder, or every rung change will look like a controller bug.
+
 ---
 
 ## 3. The model ladder
 
 The platform does not follow a fixed plan; it picks by **measured** free VRAM.
+
+### The binding rule
+
+Do not implement the tables below as ranges. Implement **one inequality**, and derive everything from
+it:
+
+```
+    footprint + headroom  <=  measured free VRAM
+
+    footprint = model weights + KV cache budget   (measure it; the figures below are
+                                                   weights-only estimates)
+    headroom  = 1 GB when the host is Free
+                3 GB when the host is Sharing
+```
+
+Pick the largest rung that satisfies it. The tables are a *derived summary for humans*, not the
+algorithm — if a table and this inequality ever disagree, the inequality wins.
 
 ### `.226` — RTX 4090, 24 GB
 
@@ -56,28 +79,34 @@ The platform does not follow a fixed plan; it picks by **measured** free VRAM.
 |---|---|---|
 | >= 20 GB | Qwen3-Coder-30B-A3B Int4 (~17 GB) | Full capability |
 | 12–20 GB | Qwen3-14B Int4 (~9 GB) | Noticeably weaker at agentic coding |
-| 7–12 GB | Qwen3-8B Int4 (~5.5 GB) | Chat fine, coding poor |
-| 4–7 GB | Qwen3-4B Int4 (~3 GB) | Degraded; still answers |
-| < 4 GB | Nothing | Gateway routes to `.87` / `.149` |
+| 8.5–12 GB | Qwen3-8B Int4 (~5.5 GB) | Chat fine, coding poor |
+| 6–8.5 GB | Qwen3-4B Int4 (~3 GB) | Degraded; still answers |
+| < 6 GB | Nothing | Gateway routes to `.87` / `.149` |
 
 ### `.87` — RTX 4070, 12 GB
 
 | Free VRAM | Platform loads |
 |---|---|
-| >= 8 GB | Embeddings (~1.2 GB) + small chat model (~5 GB) |
-| 2–8 GB | Embeddings only |
-| < 2 GB | Embeddings fall back to **CPU** — slower, but RAG never breaks |
+| >= 9.2 GB | Embeddings (~1.2 GB) + small chat model (~5 GB) |
+| 4.2–9.2 GB | Embeddings only |
+| < 4.2 GB | Embeddings fall back to **CPU** — slower, but RAG never breaks |
 
 Embeddings are the one thing that must never disappear: with them down, ingestion stops and every RAG
-query fails. The CPU fallback exists so that outcome is impossible.
+query fails. The CPU fallback exists so that outcome is impossible — which is also why embeddings get
+no special exemption from the headroom rule. Losing them costs us latency; starving the user's job
+costs them a day.
 
 ### `.149` — RTX 5080, 16 GB
 
-| Free VRAM | Platform loads |
+ComfyUI has **no sleep mode**, and its VRAM use is transient — it allocates per job and releases
+afterwards. So this host's rung is enforced at **job admission**, not by what is resident: check free
+VRAM when a request arrives and refuse or downgrade it there.
+
+| Free VRAM at admission | Platform accepts |
 |---|---|
-| >= 14 GB | FLUX.1-schnell FP8 (~12 GB) |
-| 7–14 GB | SD3.5-medium / SDXL-Turbo (~6 GB) |
-| < 7 GB | Image generation offline; the MCP tool returns a clear "unavailable, host in use" |
+| >= 15 GB | FLUX.1-schnell FP8 (~12 GB) |
+| 9–15 GB | SD3.5-medium / SDXL-Turbo (~6 GB) |
+| < 9 GB | Refuse; the MCP tool returns a clear "unavailable, host in use" |
 
 ### Why this is safe overall
 
@@ -136,7 +165,12 @@ alias so it costs nothing to adopt.
 ### 4.4 Automatic preemption — the safety net
 
 For anyone who uses neither. The fleet controller polls `nvidia-smi` on each host every 2–3 seconds;
-a foreign CUDA process or an interactive login triggers immediate demotion and reroutes the gateway.
+a foreign CUDA process triggers immediate demotion and reroutes the gateway.
+
+**Interactive-login detection is per-host config, and off by default on `.87`.** A naive "someone is
+logged in" trigger would pin `.87` to its bottom rung permanently — it is the hub, it hosts the
+controller itself, and something is always logged into it. Where the trigger is enabled, it must fire
+on a *new* session, not on the existence of one.
 
 Be clear about its limit: **it cannot prevent an OOM already in flight.** A job that allocates
 instantly on launch may still fail once, before the controller has reacted. That is exactly why the
@@ -151,6 +185,9 @@ makes the whole policy feel instant instead of annoying.
 ### 4.6 Hysteresis, so it does not flap
 
 - Only change rung on a **sustained** free-VRAM change: more than ~2 GB, held for ~60 s.
+- **Except downward, on a headroom breach.** If free VRAM falls below the headroom floor, demote
+  immediately — no 60 s wait. Hysteresis exists to stop flapping, not to make us slow to get out of
+  someone's way. Without this bypass the rule directly contradicts test 3 in §7.
 - Wait ~5 minutes of a clear card before returning to the top rung.
 
 With 30–60 minute user sessions this costs almost nothing and prevents a bursty job from triggering
@@ -181,7 +218,16 @@ modelling runs. There is no sleep mode for a memory controller. The deep tier th
 separate gate based on modelling-job state — not this ladder.
 
 **CPU contention.** Cap WSL2 in `.wslconfig` (roughly 8 processors, 48 GB on `.226`) with
-`autoMemoryReclaim=gradual`, so platform services cannot starve the modelling runs of cores. Details
+`autoMemoryReclaim=gradual`, so platform services cannot starve the modelling runs of cores.
+
+> **Conflict to be aware of.** That 48 GB cap is incompatible with the deep tier, which needs ~130 GB
+> of *guest* RAM on the same host for its experts ([`02-hardware-and-fleet.md`](./02-hardware-and-fleet.md)
+> §4). Both cannot hold at once. The resolution is two `.wslconfig` profiles — fast (8 cores / 48 GB)
+> and deep (24 cores / 180 GB) — switched with `wsl --shutdown`, which restarts every container on the
+> host. That restart cost is precisely why the deep tier is a **gated session**, not a permanent
+> catalog entry. See [`07-inference-servers.md`](./07-inference-servers.md).
+
+Details
 in [`05-host-setup.md`](./05-host-setup.md).
 
 **Anyone determined to break it.** This is a cooperative system for colleagues, not an adversarial

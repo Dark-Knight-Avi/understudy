@@ -153,6 +153,10 @@ runs for the exact resource those runs need. GPU contention is solvable with a t
 contention is not — there is no sleep-mode equivalent for memory bandwidth, and no way to hand back
 half a memory controller.
 
+Second, it needs ~130 GB of *guest* RAM, which collides with the ~48 GB WSL2 cap that protects the
+modelling runs from CPU starvation. Two `.wslconfig` profiles resolve it -- fast and deep -- switched
+with `wsl --shutdown`, which restarts every container on the host. See `07-inference-servers.md`.
+
 So the deep tier must be **gated on modelling-job state**: available when `.226` is quiet, queued or
 refused when it is not. M0 spike 7 measures what the modelling runs actually consume in RAM and
 bandwidth. **Do not promise this tier to anyone before that number exists.**
