@@ -13,6 +13,21 @@ from __future__ import annotations
 
 from fleet_controller.models import HostState, Rung
 
+# Binary floating point cannot represent most of these figures exactly, and the
+# error accumulates once a loadout subtracts several footprints in sequence:
+# 9.2 - 3.0 - 1.2 evaluates to 4.999999999999999, so a 5.0 GB model "does not fit"
+# at exactly the band edge docs/03 publishes for `.87`. The symptom would have been
+# a host that silently refuses its documented loadout on a boundary value.
+#
+# VRAM is measured in MiB, so anything below ~0.001 GB is already beneath the
+# resolution of the input. 1e-6 is comfortably inside the noise and cannot let a
+# rung through that meaningfully breaches headroom.
+_EPSILON_GB = 1e-6
+
+
+def _fits(footprint_gb: float, budget_gb: float) -> bool:
+    return footprint_gb <= budget_gb + _EPSILON_GB
+
 
 def select_rung(rungs: tuple[Rung, ...], free_gb: float, state: HostState) -> Rung | None:
     """Largest rung that fits, or None if nothing does.
@@ -21,15 +36,65 @@ def select_rung(rungs: tuple[Rung, ...], free_gb: float, state: HostState) -> Ru
     """
     if state in (HostState.YIELDING, HostState.UNKNOWN):
         return None
-    headroom = state.headroom_gb
+    budget = free_gb - state.headroom_gb
     for rung in sorted(rungs, key=lambda r: r.footprint_gb, reverse=True):
-        if rung.footprint_gb + headroom <= free_gb:
+        if _fits(rung.footprint_gb, budget):
             return rung
     return None
 
 
+def select_loadout(rungs: tuple[Rung, ...], free_gb: float, state: HostState) -> tuple[Rung, ...]:
+    """Every rung that should be resident, not just the biggest one.
+
+    `select_rung` answers "which single model fits", which is the wrong question on
+    any host carrying an `always_on` rung. On `.87`, embeddings (~1.2 GB) stay
+    resident *alongside* whatever chat model is selected -- so the two footprints
+    have to be paid together. Asking the single-rung question there would pick the
+    5 GB chat model at 8 GB free, then load embeddings on top, and leave 1.8 GB
+    rather than the promised 3 GB.
+
+    That is the same arithmetic error the band tables in docs/03 originally had,
+    reappearing one level up: it is not enough for the rule to be right about one
+    model, it has to be right about the whole loadout. docs/03's ">= 9.2 GB" band
+    for `.87` is correct precisely because it sums 1.2 + 5.0 + 3.0.
+
+    always_on rungs are claimed first, smallest first, because losing embeddings
+    stops ingestion and every RAG query while losing a chat rung only costs
+    quality. Then the largest optional rung that fits the remainder.
+    """
+    if state in (HostState.YIELDING, HostState.UNKNOWN):
+        return ()
+
+    budget = free_gb - state.headroom_gb
+    resident: list[Rung] = []
+
+    for rung in sorted((r for r in rungs if r.always_on), key=lambda r: r.footprint_gb):
+        if _fits(rung.footprint_gb, budget):
+            resident.append(rung)
+            budget -= rung.footprint_gb
+
+    optional = sorted(
+        (r for r in rungs if not r.always_on), key=lambda r: r.footprint_gb, reverse=True
+    )
+    for rung in optional:
+        if _fits(rung.footprint_gb, budget):
+            resident.append(rung)
+            break
+
+    return tuple(resident)
+
+
+def loadout_footprint_gb(loadout: tuple[Rung, ...]) -> float:
+    """Total VRAM a loadout occupies."""
+    return sum(r.footprint_gb for r in loadout)
+
+
 def minimum_free_for(rung: Rung, state: HostState) -> float:
-    """Free VRAM this rung needs. The inverse of the rule, for the dashboard."""
+    """Free VRAM this rung needs *on its own*. The inverse of the rule.
+
+    For a host with `always_on` rungs this understates the requirement -- use
+    `select_loadout` to reason about what is actually resident.
+    """
     return rung.footprint_gb + state.headroom_gb
 
 
