@@ -1,0 +1,100 @@
+# =============================================================================
+#  Caddy on .87 -- TLS on the LAN (docs/05 section 5.7)
+# =============================================================================
+#  Everything user-facing goes through one front door with a certificate that
+#  validates, so we never train the team to click through browser warnings.
+#
+#  `tls internal` issues certificates from a CA Caddy generates locally: no
+#  public DNS, no ACME, no egress. That is not a preference here -- Caddy runs on
+#  the `internal: true` network (docs/16) and could not reach an ACME server if
+#  it wanted to. The cost is that each client machine trusts that CA root once:
+#
+#      docker compose exec caddy \
+#        cat /data/caddy/pki/authorities/local/root.crt > caddy-root.crt
+#      # Windows: import to "Trusted Root Certification Authorities" (Local Machine)
+#      # Linux:   /usr/local/share/ca-certificates/ then update-ca-certificates
+#
+#  That root lives in the `caddy_data` volume. `docker compose down -v` destroys
+#  it and every client has to trust a new one, so copy it off before a level-3
+#  removal (../README.md).
+#
+#  NAME RESOLUTION: add A records for *.ai.lan on the internal DNS server, all
+#  pointing at 10.0.0.87. If you do not control DNS, five hosts-file lines per
+#  client machine. DNS is worth asking for; hosts files rot.
+#
+#  Upstreams are addressed by SERVICE NAME over the internal Docker network
+#  (docs/16 section 4.2). There is no public DNS on that network, and there is
+#  nothing here that needs any.
+# =============================================================================
+
+{
+	email ops@internal.invalid
+
+	# docs/05 says `admin off`. We bind it to loopback INSIDE the container
+	# instead, purely so compose.yaml's healthcheck has something real to ask.
+	# 127.0.0.1 here is the container's own loopback: not published, not on any
+	# Docker network, unreachable from the LAN and from every other container.
+	admin 127.0.0.1:2019
+}
+
+# --- Chat UI -- what the team actually visits -------------------------------
+chat.ai.lan {
+	tls internal
+	encode zstd gzip
+	reverse_proxy open-webui:8080 {
+		# Streaming responses. A default read timeout that expires mid-answer
+		# looks exactly like a model failure and is debugged as one.
+		flush_interval -1
+	}
+}
+
+# --- Fleet dashboard -- the toggle from docs/03 section 4.1 -----------------
+#  Bookmark this on each machine's desktop. The status line is the entire point:
+#  nobody should have to guess whether the VRAM is actually free, and nobody
+#  should have to learn a command.
+fleet.ai.lan {
+	tls internal
+	reverse_proxy fleet-controller:8090 {
+		# The dashboard pushes SSE events; buffering them defeats the "live"
+		# part of a live dashboard.
+		flush_interval -1
+	}
+}
+
+# --- Gateway ----------------------------------------------------------------
+#  Clients (OpenCode, Cline) may also hit 10.0.0.87:4000 directly on the LAN.
+api.ai.lan {
+	tls internal
+	reverse_proxy litellm:4000 {
+		flush_interval -1
+	}
+	# deep-slow answers can take minutes by design (docs/06: timeout 1800). A
+	# reverse-proxy timeout shorter than the model's is a 504 that looks like a
+	# gateway bug -- docs/07 section 17, test 3 checks the stream survives Caddy.
+	# Raise the transport timeouts here if that test fails; do NOT lower
+	# LiteLLM's to match Caddy's.
+}
+
+# --- Local image registry (docs/05 section 5.6) -----------------------------
+#  The preferred option: TLS, one hostname, no per-host daemon.json drift.
+#  compose.yaml also publishes :5000 plain-HTTP so M1 is not blocked on
+#  distributing the CA root. When every host trusts the root, delete that
+#  publish and the "insecure-registries" line from each host's daemon.json.
+registry.ai.lan {
+	tls internal
+	reverse_proxy registry:5000
+	# Image layers are large; do not let a body-size default truncate a push.
+	request_body {
+		max_size 0
+	}
+}
+
+# --- Document management (RAGFlow, ADR-0007) --------------------------------
+#  Two UIs is the acknowledged UX wart of adopting RAGFlow: chat in Open WebUI,
+#  documents here. Giving it a real name and a real certificate is the cheapest
+#  part of explaining that to users.
+docs.ai.lan {
+	tls internal
+	encode zstd gzip
+	reverse_proxy ragflow:9380
+}

@@ -1,0 +1,695 @@
+# =============================================================================
+#  .87 -- 10.0.0.87 -- THE HUB
+#  RTX 4070 12 GB | i9-14900K 24c/32t | 128 GB | 2x2 TB NVMe | Windows + WSL2
+# =============================================================================
+#
+#  Everything that must stay up lives here, because .87 is the least contended
+#  box in the fleet (docs/02 section 1). It is also where the egress boundary is
+#  built, and that is the single most important thing in this file.
+#
+#  WHY THIS IS A SEPARATE FILE AND NOT A PROFILE OF ONE BIG FILE:
+#  the three hosts run genuinely different things, on different OS setups, on
+#  two subnets. delivery-plan.md section 2 -- "three small explicit files are
+#  easier to reason about at 3 a.m. than one file with conditional profiles."
+#
+#  DEPLOY:      make deploy HOST=87
+#               (== cd deploy/host-87 && docker compose pull && docker compose up -d)
+#  ROLLBACK:    edit the *_TAG line in .env, then `docker compose up -d <service>`.
+#               That is the entire mechanism, and it is why nothing here is :latest.
+#  REMOVE:      docker compose down                  (level 1, reversible in seconds)
+#               docker compose down -v --rmi all     (level 3 -- see ../README.md,
+#                                                     there is non-Docker residue)
+#
+#  WSL2 FACTS THAT APPLY TO EVERY SERVICE BELOW:
+#   * The NVIDIA driver comes through from Windows via /usr/lib/wsl/lib. NEVER
+#     install a Linux NVIDIA driver in the guest (docs/05 section 3). Only the
+#     CUDA *toolkit* -- 12-6 on this host, 13-1 on .226. Installing cuda-drivers
+#     overwrites the passthrough and looks like a hardware fault.
+#   * Services bind 0.0.0.0, never 127.0.0.1. With networkingMode=mirrored the
+#     guest shares the Windows interfaces, so 0.0.0.0 inside WSL2 is reachable at
+#     10.0.0.87. Bound to loopback it is reachable from nowhere useful.
+#   * restart: unless-stopped is NOT sufficient for boot resilience (N8). WSL2
+#     does not start at boot. See the Task Scheduler section of ../README.md.
+# =============================================================================
+
+name: aiplatform-87
+
+# -----------------------------------------------------------------------------
+#  NETWORKS -- the egress boundary (docs/16, ADR-0004, requirement N1)
+# -----------------------------------------------------------------------------
+#  This block is the enforcement. Not a policy document, not a code-review rule:
+#  one line of Compose that Docker turns into "there is no default route".
+#
+#      platform   internal: true   -- NO route off-host, NO NAT, NO public DNS
+#      egress     bridge           -- normal outbound. SearXNG only.
+#      lan        bridge           -- the deliberate holes. See below.
+#
+#  A container on `platform` cannot reach the internet regardless of what its
+#  code attempts: no dependency phone-home, no update check, no crash reporter,
+#  no misconfigured base image. That is why we enforce here rather than in our
+#  own source -- our source is one careless httpx.get away from being wrong, and
+#  nobody would ever know (docs/16 section 1).
+#
+#  Publishing ports still works on an internal network. `internal: true` removes
+#  the outbound masquerade rule; it does not remove the inbound DNAT that port
+#  publishing installs. Caddy on `platform` still answers the LAN on :443.
+#
+#  >>> THE DELIBERATE HOLES -- prove these in the M0/M8 capture <<<
+#  docs/16 section 4.1 names the flows that must cross the *host* boundary even
+#  though they never leave the *network*:
+#
+#      litellm           -> 10.0.0.226:8000   vLLM fast tier
+#      litellm           -> 10.0.0.226:8081   ik_llama.cpp deep tier
+#      litellm           -> 10.0.1.210:8000   overflow chat
+#      mcp-tools         -> 10.0.0.226:8188   ComfyUI image gen, admission-
+#                                               controlled (docs/03; moved off
+#                                               .149, which is deferred)
+#      fleet-controller  -> .226:8099, .210:8099 per-host agents
+#
+#  Docker has no "LAN-only" network primitive, so `internal: true` cannot express
+#  this: a container either has a default route or it does not. docs/16 says
+#  "handle them with an explicit route to those hosts" -- there is no way to
+#  install such a route on an internal network without giving the container
+#  NET_ADMIN, which is worse. The construction is therefore a THIRD bridge
+#  network with a pinned subnet, attached to exactly three containers, plus a
+#  host firewall rule that clamps that subnet to the two internal /24s. The
+#  Compose file gives it a stable address range; the firewall gives it the
+#  restriction. Neither half is optional and neither is sufficient alone.
+#
+#      # In DOCKER-USER, which is evaluated before Docker's own FORWARD rules,
+#      # on .87 inside WSL2. Verify by test, never by reading (docs/16 s4.3).
+#      iptables -I DOCKER-USER -s 172.28.9.0/24 -d 10.0.0.0/24 -j RETURN
+#      iptables -I DOCKER-USER -s 172.28.9.0/24 -d 10.0.1.0/24 -j RETURN
+#      iptables -A DOCKER-USER -s 172.28.9.0/24 -j DROP
+#
+#  CAPTURE OBLIGATIONS (docs/16 section 7, M0 spike 4 and the M8 headline test):
+#   * 172.28.9.0/24 must appear in the capture ONLY with 10.0.x.x destinations.
+#     One packet from that subnet to a public address fails criterion 2, and it
+#     is exactly the failure this network exists to make visible.
+#   * The egress-leg capture must show exactly ONE internal source address: the
+#     SearXNG container's.
+#   * Containers on `lan` CAN resolve public DNS through Docker's embedded
+#     resolver. That is a channel. The DOCKER-USER DROP closes it for everything
+#     but the two subnets, and .87's DNS log is the second, independent piece of
+#     evidence docs/16 section 4.2 asks for.
+# -----------------------------------------------------------------------------
+networks:
+  platform:
+    name: aiplatform-internal
+    driver: bridge
+    internal: true          # <- the whole enforcement, in one line (docs/16 s4.1)
+
+  egress:
+    name: aiplatform-egress
+    driver: bridge
+    # SearXNG only. If a review ever shows a second service on this network, the
+    # M8 egress proof is void until it has been re-run and re-recorded.
+
+  lan:
+    name: aiplatform-lan
+    driver: bridge
+    ipam:
+      config:
+        # Pinned so the DOCKER-USER rules above are about a known range rather
+        # than whatever Docker allocated this boot.
+        - subnet: 172.28.9.0/24
+
+# -----------------------------------------------------------------------------
+#  VOLUMES -- removability (docs/18 section 7.2, delivery-plan section 10)
+# -----------------------------------------------------------------------------
+#  Named volumes only, so `docker compose down -v` genuinely returns the host to
+#  a plain workstation. Two of them use driver_opts to bind a named volume onto a
+#  specific NVMe -- still a named volume (so `down -v` removes it), but physically
+#  where docs/02 section 5 requires:
+#      postgres_data  -> NVMe #1, alone, for IO isolation
+#      registry_data  -> NVMe #2
+#  The directories are created by the operator during host setup; Docker will not
+#  create them for a bind-backed volume, and that failure is the point -- silently
+#  writing Postgres onto the distro's VHDX is worse than refusing to start.
+# -----------------------------------------------------------------------------
+volumes:
+  postgres_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${POSTGRES_DATA_DIR}      # /srv/ai-platform/data/postgres (NVMe #1)
+  registry_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${REGISTRY_DATA_DIR}      # /srv/ai-platform/data/registry (NVMe #2)
+  caddy_data:                           # holds the internal CA -- see ../README.md
+  caddy_config:
+  open_webui_data:
+  infinity_cache:
+  ragflow_data:
+  mcp_artifacts:
+  fleet_data:
+  hf_cache:
+
+# -----------------------------------------------------------------------------
+#  Shared fragments. Repeated otherwise, and the GPU one is the block people copy
+#  wrong.
+# -----------------------------------------------------------------------------
+x-gpu: &gpu
+  # The only supported way to claim a GPU from Compose. Under WSL2 this works
+  # because the Windows driver is passed through and nvidia-container-toolkit is
+  # installed IN THE GUEST (docs/05 section 5.5). There is no Linux driver here
+  # and there must never be one.
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+x-logging: &logging
+  # Belt to daemon.json's braces (docs/05 section 5.5). An unrotated vLLM log
+  # quietly eats tens of GB, and on this host that disk is Postgres's neighbour.
+  logging:
+    driver: json-file
+    options:
+      max-size: "50m"
+      max-file: "3"
+
+services:
+
+  # ===========================================================================
+  #  CADDY -- the only front door (docs/05 section 5.7)
+  # ===========================================================================
+  caddy:
+    image: caddy:2.8.4-alpine        # PIN. Rollback is editing this line.
+    restart: unless-stopped
+    <<: *logging
+    ports:
+      # 0.0.0.0 on purpose: with mirrored networking this is 10.0.0.87:443.
+      # docs/05 section 9's Windows firewall rule scopes it to the two internal
+      # /24s -- Docker publishes, the firewall restricts.
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data             # the internal CA lives here. Losing this
+      - caddy_config:/config         # volume means re-trusting a new root on
+                                     # every client machine -- the one volume
+                                     # worth copying off by hand.
+    networks: [platform]
+    # Caddy is on the internal network ONLY, which makes `tls internal` not a
+    # preference but a necessity: ACME is structurally impossible from here.
+    # That is the right answer anyway -- no public DNS, no egress, one CA root
+    # distributed once.
+    healthcheck:
+      # ./Caddyfile binds the admin API to loopback INSIDE the container -- a
+      # deliberate deviation from docs/05's `admin off`, purely so this check can
+      # exist. It is reachable from no other container and from no other host.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      open-webui:
+        condition: service_started
+      litellm:
+        condition: service_started
+
+  # ===========================================================================
+  #  POSTGRES 17 + pgvector (docs/10)
+  # ===========================================================================
+  postgres:
+    image: pgvector/pgvector:0.8.0-pg17   # PIN. pgvector's dimension ceiling and
+    restart: unless-stopped               # iterative-scan behaviour are version-
+    <<: *logging                          # specific (docs/10 sections 5 and 8).
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    command:
+      # Sized against the WSL2 CAP (64 GB on this host), not the 128 GB sticker.
+      # Postgres does not see the sticker -- docs/10 section 11.
+      - postgres
+      - -c
+      - shared_buffers=8GB
+      - -c
+      - maintenance_work_mem=2GB     # HNSW index builds want this (docs/10 s8)
+      - -c
+      - max_connections=200
+    ports:
+      # Published because development happens OFF-HOST against this database
+      # (delivery-plan section 3, rule 1: DATABASE_URL=...@10.0.0.87:5432 with
+      # a separate _dev database). Scoped to the internal subnets by the Windows
+      # firewall, not by Docker.
+      - "0.0.0.0:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks: [platform]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ===========================================================================
+  #  LOCAL DOCKER REGISTRY (docs/05 section 5.6, delivery-plan section 4)
+  # ===========================================================================
+  #  Each host pulls a built image instead of rebuilding it, and image traffic
+  #  never leaves the network (ADR-0004). This is why our own service images are
+  #  tagged 10.0.0.87:5000/<service>:<version> throughout this tree.
+  # ===========================================================================
+  registry:
+    image: registry:2.8.3               # PIN.
+    restart: unless-stopped
+    <<: *logging
+    environment:
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+    ports:
+      # Published plain-HTTP on the LAN, which requires
+      #     "insecure-registries": ["10.0.0.87:5000"]
+      # in /etc/docker/daemon.json on .226 and .210. docs/05 section 5.6 calls
+      # this the "start insecure if that unblocks M1" option and says to write
+      # the Caddy route the same week -- it is written (registry.ai.lan in
+      # ./Caddyfile). Once every host trusts Caddy's root, delete this publish
+      # and the daemon.json line: per-host daemon.json drift is exactly what
+      # makes the fourth host painful.
+      - "0.0.0.0:5000:5000"
+    volumes:
+      - registry_data:/var/lib/registry
+    networks: [platform]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:5000/v2/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ===========================================================================
+  #  LITELLM -- the gateway (docs/06)
+  # ===========================================================================
+  litellm:
+    image: ghcr.io/berriai/litellm:main-v1.72.6   # PIN. LiteLLM's config schema
+    restart: unless-stopped                       # moves between releases; read
+    <<: *logging                                  # the changelog before bumping,
+                                                  # especially for catalog and
+                                                  # health-check changes.
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--host", "0.0.0.0"]
+    ports:
+      - "0.0.0.0:4000:4000"          # clients and other hosts. 0.0.0.0 required.
+    volumes:
+      - ./litellm.config.yaml:/app/config.yaml:ro
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY}
+      # LiteLLM gets its OWN database on the same server, never the platform's
+      # application database -- it runs its own migrations (docs/06 section 4).
+      DATABASE_URL: ${LITELLM_DATABASE_URL}
+      VLLM_226_KEY: ${VLLM_226_KEY}
+      VLLM_87_KEY: ${VLLM_87_KEY}
+      VLLM_210_KEY: ${VLLM_210_KEY}
+      INFINITY_KEY: ${INFINITY_KEY}
+      RAG_SERVICE_KEY: ${RAG_SERVICE_KEY}
+      UI_USERNAME: ${LITELLM_UI_USERNAME}
+      UI_PASSWORD: ${LITELLM_UI_PASSWORD}
+    networks:
+      - platform
+      # >>> DELIBERATE HOLE <<<  litellm -> .226:8000 (fast tier), .226:8081
+      # (deep tier), .210:8000 (overflow). LAN destinations on other hosts, so
+      # they cannot ride the internal network. The M8 capture must show
+      # 172.28.9.0/24 talking to 10.0.0.226 and 10.0.1.210 and nothing else.
+      - lan
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # curl is not guaranteed in this image; python is. Same approach for every
+      # python-based service below.
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=3)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ===========================================================================
+  #  OPEN WEBUI -- the chat UI (docs/06 section 9)
+  # ===========================================================================
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:v0.6.15   # PIN.
+    restart: unless-stopped
+    <<: *logging
+    environment:
+      # Talks to the gateway by SERVICE NAME over the internal network -- not by
+      # IP, not through Caddy. docs/16 section 4.2: platform containers address
+      # each other by service name only, because there is no public DNS here.
+      OPENAI_API_BASE_URL: http://litellm:4000/v1
+      OPENAI_API_KEY: ${OPEN_WEBUI_GATEWAY_KEY}   # the per-surface virtual key,
+                                                  # never the master key
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY}
+      WEBUI_URL: https://chat.ai.lan
+      # Open WebUI's built-in RAG is explicitly not what we use (ADR-0002,
+      # upheld by ADR-0007): basic chunking, no reranking, citations too weak to
+      # build a trust guarantee on. Retrieval is RAGFlow, reached as the
+      # `team-docs` model through the gateway.
+      ENABLE_RAG_WEB_SEARCH: "false"
+      ENABLE_OLLAMA_API: "false"
+      # No phone-home. `internal: true` already makes this structurally
+      # impossible; these are belt to that brace and they document the intent.
+      SCARF_NO_ANALYTICS: "true"
+      DO_NOT_TRACK: "true"
+      ANONYMIZED_TELEMETRY: "false"
+    volumes:
+      - open_webui_data:/app/backend/data
+    networks: [platform]
+    # Deliberately NOT published: docs/05 section 4 puts Open WebUI behind Caddy,
+    # and the host's :8080 would collide with the MCP server's published port.
+    depends_on:
+      litellm:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+  # ===========================================================================
+  #  SEARXNG -- the ONLY container with a route out (docs/16 section 3)
+  # ===========================================================================
+  searxng:
+    image: searxng/searxng:2025.6.9-e4b7a3a05    # PIN to the dated tag you have
+    restart: unless-stopped                      # actually verified. SearXNG's
+    <<: *logging                                 # config schema does move.
+    volumes:
+      - ./searxng:/etc/searxng:ro     # settings.yml -- docs/16 section 3.
+                                      # autocomplete MUST be "" (off): it sends
+                                      # partial queries as the user types, which
+                                      # nobody consciously chose to send and
+                                      # which appear in no log a person reads.
+    environment:
+      SEARXNG_BASE_URL: http://searxng:8080/
+      SEARXNG_SECRET: ${SEARXNG_SECRET}
+    ports:
+      # docs/05 section 4: SearXNG on 8888, internal. Published so the UI and the
+      # query log are inspectable from the LAN; the tool path is in-container.
+      - "0.0.0.0:8888:8080"
+    networks:
+      # THE ONLY SERVICE IN THIS FILE ON TWO NETWORKS. If you are reviewing a
+      # diff that adds `egress` to any other service, that diff invalidates N1
+      # and the M8 egress proof until both have been re-run and re-recorded.
+      #
+      # docs/16 section 4.3 wants this container's address PINNED, because the
+      # single-permitted-source iptables rule and the "one internal source in the
+      # capture" criterion are otherwise rules about whatever restarted last.
+      # Pinning needs an explicit ipam subnet on both networks above; do it when
+      # you write the firewall rules, and record the egress-side address in
+      # docs/16 at the same time.
+      - platform
+      - egress
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # ===========================================================================
+  #  INFINITY -- embeddings on GPU, reranker on CPU (docs/12 section 5)
+  # ===========================================================================
+  #  Two containers rather than one process, so a multi-gigabyte model and
+  #  PyTorch's thread pools stay out of everything else.
+  #
+  #  Embeddings are the one thing that must never disappear (docs/03 section 3):
+  #  with them down, ingestion stops and every RAG query fails. They still get no
+  #  headroom exemption -- losing them costs us latency, starving the user's job
+  #  costs them a day. The CPU fallback is what makes that trade acceptable.
+  # ===========================================================================
+  infinity-embed:
+    image: michaelf34/infinity:0.0.76-cu124   # PIN, and match the host's CUDA
+    restart: unless-stopped                   # line (12.6 on .87).
+    <<: [*gpu, *logging]
+    command:
+      - v2
+      - --model-id=${EMBEDDINGS_MODEL}
+      - --revision=${EMBEDDINGS_REVISION}     # an unpinned model is an
+      - --device=cuda                         # unreproducible deploy
+      - --port=7997
+      - --api-key=${INFINITY_KEY}
+    environment:
+      HF_HOME: /cache/huggingface
+      HF_HUB_OFFLINE: "1"   # weights are pre-downloaded. This is an egress
+                            # control as much as a convenience: a container that
+                            # cannot reach Hugging Face cannot silently
+                            # re-download a model over the 1 GbE link mid-
+                            # incident, and it makes the pinned-revision rule
+                            # enforceable rather than aspirational (docs/07 s4).
+      DO_NOT_TRACK: "true"
+    volumes:
+      - infinity_cache:/cache/huggingface
+    ports:
+      - "0.0.0.0:7997:7997"
+    networks: [platform]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:7997/health', timeout=5)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s    # first start pulls the model into VRAM
+
+  infinity-rerank:
+    image: michaelf34/infinity:0.0.76-cu124
+    restart: unless-stopped
+    <<: *logging
+    # NO gpu block, on purpose (docs/03 section 5). .87's 12 GB cannot hold the
+    # reranker alongside embeddings, and it must not vanish mid-query. 24 cores
+    # and 128 GB make ~30 candidates a few hundred milliseconds.
+    command:
+      - v2
+      - --model-id=${RERANKER_MODEL}
+      - --revision=${RERANKER_REVISION}
+      - --device=cpu
+      - --port=7998
+      - --api-key=${INFINITY_KEY}
+    environment:
+      HF_HOME: /cache/huggingface
+      HF_HUB_OFFLINE: "1"
+      OMP_NUM_THREADS: "12"
+      DO_NOT_TRACK: "true"
+    cpuset: "8-19"          # 12 of the guest's cores. .87 is still somebody's
+                            # workstation; leave the rest of the box alone (N5).
+    volumes:
+      - infinity_cache:/cache/huggingface
+    ports:
+      - "0.0.0.0:7998:7998"
+    networks: [platform]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:7998/health', timeout=5)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  # ===========================================================================
+  #  vLLM -- the floor that never disappears (docs/07 section 9)
+  # ===========================================================================
+  #  A 4B Int4 with a small context, sized to COEXIST with Infinity on the 12 GB
+  #  card. The utilisation figure is low on purpose: if the small chat model and
+  #  embeddings ever contend, the chat model is the one that loses.
+  # ===========================================================================
+  vllm-small:
+    image: vllm/vllm-openai:v0.9.1    # PIN, and match the host's CUDA line. A
+    restart: unless-stopped           # wheel built against the wrong CUDA minor
+    <<: [*gpu, *logging]              # fails as a missing symbol at import time,
+    ipc: host                         # long after you have forgotten this step.
+                                      # ipc: host because vLLM needs a large
+                                      # /dev/shm.
+    ports:
+      - "0.0.0.0:8000:8000"
+    volumes:
+      - ${MODELS_DIR}:/models:ro      # declared data directory, read-only
+      - hf_cache:/root/.cache/huggingface
+    environment:
+      VLLM_SERVER_DEV_MODE: "1"       # exposes /sleep and /wake_up -- the entire
+                                      # sharing policy rides on these endpoints
+      HF_HUB_OFFLINE: "1"
+      DO_NOT_TRACK: "true"
+    command:
+      - --model=/models/${SMALL_MODEL_DIR}
+      - --served-model-name=small-tier
+      - --served-model-name=chat-small
+      - --host=0.0.0.0
+      - --port=8000
+      - --api-key=${VLLM_87_KEY}
+      - --quantization=awq_marlin     # the optimised Ada kernel for AWQ weights.
+                                      # Wrong value = slow path or refusal to
+                                      # start; the name differs per format.
+      - --kv-cache-dtype=fp8          # Ada (CC 8.9) supports FP8 natively. A/B
+                                      # it on the eval set before making it
+                                      # permanent (docs/07 section 5).
+      - --gpu-memory-utilization=0.45 # SEMANTICS ARE VERSION-DEPENDENT: whether
+                                      # this is a fraction of TOTAL or of FREE
+                                      # VRAM has varied between vLLM versions,
+                                      # and it is the single flag that decides
+                                      # whether the sharing policy is safe.
+                                      # Measure it (docs/07 section 7) and record
+                                      # the answer before trusting this number.
+      - --max-model-len=16384
+      - --max-num-seqs=4
+      - --enable-sleep-mode
+      - --disable-log-requests        # prompts do not belong in container logs
+    networks: [platform]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8000/health', timeout=5)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 300s   # a cold model load from NVMe is minutes, not seconds.
+                           # NOTE (docs/06 section 7): a vLLM in sleep mode still
+                           # answers HTTP. Whether it reports HEALTHY while its
+                           # weights are parked in RAM is M0 spike 6's question,
+                           # and the answer decides how much work the fleet
+                           # controller has to do. Record it in docs/06 and 07.
+
+  # ===========================================================================
+  #  RAGFLOW -- retrieval (ADR-0007)
+  # ===========================================================================
+  #  We do not build retrieval. ADR-0007 adopted RAGFlow behind the seam ADR-0005
+  #  already defined, so it registers in the LiteLLM catalog as the `team-docs`
+  #  model exactly as our own service would have. The swap is a config change,
+  #  not a redesign, because retrieval was made a model endpoint for unrelated
+  #  reasons and it pays off here.
+  #
+  #  >>> OPEN ITEM FOR M1.5 -- READ BEFORE DEPLOYING <<<
+  #  Upstream RAGFlow ships its own compose stack with MySQL, Redis, MinIO and a
+  #  document engine (Elasticsearch or Infinity). Those are NOT vendored here,
+  #  because which of them we run is exactly what the one-day M1.5 spike settles
+  #  (ADR-0007's three criteria: does it refuse; per-user isolation on the free
+  #  tier; reachable over MCP). Until that spike has a verdict, bring RAGFlow's
+  #  bundled stack up alongside this one with `aiplatform-internal` joined as an
+  #  external network, then fold the result back into this file. Starting this
+  #  service alone gives you a container that cannot find its datastores.
+  # ===========================================================================
+  ragflow:
+    image: infiniflow/ragflow:v0.19.1  # PIN. Someone else's release cadence on
+    restart: unless-stopped            # the most trust-sensitive part of the
+    <<: *logging                       # product is ADR-0007's stated cost.
+    environment:
+      # Its models come from OUR gateway, by service name, over the internal
+      # network. "Accepts any OpenAI-compatible endpoint" is the property the
+      # whole ADR rests on.
+      RAGFLOW_LLM_BASE_URL: http://litellm:4000/v1
+      RAGFLOW_LLM_API_KEY: ${RAGFLOW_GATEWAY_KEY}
+      RAGFLOW_EMBEDDING_BASE_URL: http://infinity-embed:7997
+      DO_NOT_TRACK: "true"
+    volumes:
+      - ragflow_data:/ragflow/data
+    ports:
+      - "0.0.0.0:9380:9380"
+    networks: [platform]
+    depends_on:
+      infinity-embed:
+        condition: service_started
+      litellm:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:9380/v1/system/version', timeout=5)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 180s
+
+  # ===========================================================================
+  #  FLEET CONTROLLER -- ours (docs/08)
+  # ===========================================================================
+  #  Polls every host's GPU, decides which rung each should run, makes it happen,
+  #  and serves the page that tells people what is going on. The dashboard is
+  #  doing as much work here as the preemption logic (docs/03 Reflect).
+  # ===========================================================================
+  fleet-controller:
+    image: 10.0.0.87:5000/fleet-controller:${FLEET_CONTROLLER_TAG}
+    restart: unless-stopped
+    <<: *logging
+    environment:
+      FLEET_CONFIG: /config/fleet.yaml
+      DATABASE_URL: ${DATABASE_URL}        # leases go in Postgres, one table,
+                                           # not a new datastore (docs/08 s8.2)
+      LITELLM_BASE_URL: http://litellm:4000
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}   # the controller is the ONLY
+                                                  # writer of the catalog
+                                                  # (docs/06 section 7). Nobody
+                                                  # edits it through the LiteLLM
+                                                  # UI on a live system.
+    volumes:
+      - ../fleet.yaml:/config/fleet.yaml:ro   # one file, shared by the fleet
+      - fleet_data:/data
+    ports:
+      - "0.0.0.0:8090:8090"                   # docs/05 section 4. Also behind
+                                              # Caddy as fleet.ai.lan.
+    networks:
+      - platform
+      # The controller polls each host's agent on :8099 (docs/05 section 4).
+      # Cross-host, therefore the lan network -- same deliberate hole, same
+      # capture obligation.
+      - lan
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8090/healthz', timeout=3)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # ===========================================================================
+  #  MCP TOOL SERVER -- ours (docs/14)
+  # ===========================================================================
+  mcp-tools:
+    image: 10.0.0.87:5000/mcp-tools:${MCP_TOOLS_TAG}
+    restart: unless-stopped
+    <<: *logging
+    environment:
+      RAG_URL: http://ragflow:9380
+      SEARXNG_URL: http://searxng:8080     # reached as a PEER on the internal
+                                           # network. mcp-tools has no egress
+                                           # route of its own and must never be
+                                           # handed one "just for convenience" --
+                                           # that is the enforcement point for N1
+                                           # (docs/14 section 4).
+      COMFYUI_URL: ${COMFYUI_URL}          # http://10.0.0.226:8188
+      FLEET_URL: http://fleet-controller:8090
+      MCP_TOKEN: ${MCP_TOKEN}
+      WEB_SEARCH_ENABLED: ${WEB_SEARCH_ENABLED}  # ADR-0004: OFF by default, per
+                                                 # workspace. A team on a
+                                                 # sensitive corpus runs fully
+                                                 # air-gapped with no special
+                                                 # deployment, and enabling
+                                                 # search is a decision someone
+                                                 # can be seen to have made.
+    volumes:
+      - mcp_artifacts:/data/artifacts
+    ports:
+      # docs/05 section 4 says 8002 for the MCP server; docs/14 shows 8080:8080,
+      # which would collide with Open WebUI on this host. Host 8002 -> container
+      # 8080 satisfies both; clients configure http://10.0.0.87:8002/mcp.
+      - "0.0.0.0:8002:8080"
+    networks:
+      - platform
+      # >>> DELIBERATE HOLE <<<  mcp-tools -> .226:8188 (ComfyUI). Image
+      # generation moved off the deferred .149 and now shares the 4090 under
+      # admission control (docs/03). Cross-host, so it needs the lan network.
+      # In the M8 capture this container must appear talking to 10.0.0.226 and
+      # to nothing else.
+      - lan
+    depends_on:
+      searxng:
+        condition: service_started
+      fleet-controller:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8080/healthz', timeout=3)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

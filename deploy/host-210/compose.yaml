@@ -1,0 +1,251 @@
+# =============================================================================
+#  .210 -- 10.0.1.210 -- OVERFLOW AND EMBEDDINGS FAILOVER
+#  RTX 4070 12 GB | i9-14900K 24c/32t | 96 GB | 2x2 TB NVMe | Windows + WSL2
+# =============================================================================
+#
+#  >>> THIS IS SOMEBODY'S DAILY WORKSTATION. <<<
+#  It is assigned to a named person, they use it every day, and they did not ask
+#  for a platform to live on it. That makes it the least reliable host in the
+#  fleet -- not because of its hardware, but because its owner has first claim
+#  and will exercise that claim without warning (docs/02 section 1).
+#
+#  So this host holds NOTHING CRITICAL. Everything here is work that can vanish
+#  mid-flight:
+#     * burst chat capacity (a small model, second-choice routing)
+#     * a GPU REPLICA of the embeddings service -- the real prize, because
+#       embeddings are the one thing that must never die and until now their only
+#       fallback was CPU on .87. A second GPU copy turns a degraded fallback into
+#       a proper failover.
+#
+#  What it must NOT get: the deep tier. Its 96 GB could hold a mid-size MoE, but
+#  CPU offload is memory-bandwidth-hungry and would make the machine sluggish for
+#  the person sitting at it -- exactly the outcome the sharing policy exists to
+#  prevent. It also gets nothing stateful: no Postgres, no gateway, no registry.
+#
+#  >>> TREAT THIS HOST AS THE STRICTEST CASE. Prefer demoting early over
+#  squeezing an extra rung. <<<  (docs/03 section 3)
+#
+#  DEPLOY:      make deploy HOST=210
+#  ROLLBACK:    edit the *_TAG line in .env, then `docker compose up -d <service>`
+#  REMOVE:      docker compose down    -- this is the host most likely to be
+#               asked for, and it must be answered without argument
+#
+#  .19.x, NOT .32.x. This host is on the other subnet, so:
+#     * every firewall rule needs BOTH /24s (docs/05 section 9)
+#     * cross-subnet latency is M0 spike 4's question. If routing chat here is
+#       worse than routing it to the 4B on .87, do not route chat here.
+#
+#  WSL2 (docs/05 sections 3 and 5): driver passed through from Windows, never a
+#  Linux driver in the guest; bind 0.0.0.0; and restart: unless-stopped does not
+#  survive a reboot on its own -- see ../README.md.
+#
+#  .wslconfig for this host should be the most conservative in the fleet. The
+#  hub gets a generous cap because nothing contends for it; this box is the
+#  opposite. Suggested starting point, to be tightened if its owner notices
+#  anything at all:
+#      [wsl2]
+#      processors=6
+#      memory=24GB
+#      swap=0
+#      networkingMode=mirrored
+#      autoMemoryReclaim=gradual
+#      dnsTunneling=true
+#      firewall=true
+# =============================================================================
+
+name: aiplatform-210
+
+networks:
+  platform:
+    name: aiplatform-internal
+    driver: bridge
+    internal: true    # No route out, same as everywhere else. Nothing on this
+                      # host has any business reaching the internet, and the
+                      # inbound flows from .87 arrive on published ports.
+
+volumes:
+  hf_cache:
+  infinity_cache:
+  agent_data:
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "50m"
+      max-file: "3"
+
+services:
+
+  # ===========================================================================
+  #  INFINITY -- the embeddings REPLICA (docs/02 section 1, docs/03 section 3)
+  # ===========================================================================
+  #  The reason this host is in the fleet at all. Embeddings are on the hot path
+  #  for every query and every ingested chunk; with them down, ingestion stops
+  #  and every RAG query fails. .87 has the primary and a CPU fallback; this is
+  #  the second GPU copy that turns "degraded" into "failover".
+  #
+  #  MUST be the same model at the same revision as .87's primary. Changing the
+  #  embedding model invalidates every vector in the database, and a replica
+  #  running a different revision is a silent, nasty version of that
+  #  (delivery-plan section 9, the embedding-model trap).
+  #
+  #  Reachable at http://10.0.1.210:7997 -- EMBEDDINGS_FAILOVER_URL in the
+  #  repo-root .env.example.
+  # ===========================================================================
+  infinity-embed:
+    image: michaelf34/infinity:0.0.76-cu124   # PIN, same tag as .87. This host
+    restart: unless-stopped                   # reports CUDA 13.1; confirm the
+    <<: *logging                              # image's CUDA line matches before
+                                              # pulling it.
+    command:
+      - v2
+      - --model-id=${EMBEDDINGS_MODEL}
+      - --revision=${EMBEDDINGS_REVISION}     # must equal .87's. Verify, do not
+      - --device=cuda                         # assume.
+      - --port=7997
+      - --api-key=${INFINITY_KEY}
+    environment:
+      HF_HOME: /cache/huggingface
+      HF_HUB_OFFLINE: "1"      # pre-downloaded weights; no egress at start-up
+      DO_NOT_TRACK: "true"
+    volumes:
+      - infinity_cache:/cache/huggingface
+    ports:
+      - "0.0.0.0:7997:7997"
+    networks: [platform]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+        limits:
+          # ~1.2 GB of VRAM, and deliberately little CPU. The person at this
+          # machine must never be able to tell this is running.
+          cpus: "2.0"
+          memory: 6G
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:7997/health', timeout=5)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  # ===========================================================================
+  #  vLLM -- burst chat capacity (docs/02 section 1, docs/03 section 3)
+  # ===========================================================================
+  #  Qwen3-8B Int4 (~5.5 GB), and only when the card is genuinely free. The
+  #  ladder for this host:
+  #      >= 8.5 GB free   embeddings replica (~1.2) + Qwen3-8B Int4 (~5.5)
+  #      4.2-8.5 GB       embeddings replica only
+  #      < 4.2 GB         nothing
+  #  which is the same 3 GB sharing headroom as everywhere else, applied to a
+  #  host where we should be quicker to give up.
+  #
+  #  This is second-choice capacity in the gateway, never a primary. If it
+  #  disappears mid-request the fallback chain in docs/06 section 6 handles it,
+  #  and that is the design intent -- do not add anything here that would make
+  #  its disappearance a problem.
+  # ===========================================================================
+  vllm-small:
+    image: vllm/vllm-openai:v0.9.1    # PIN, matched to this host's CUDA line
+    restart: unless-stopped
+    <<: *logging
+    ipc: host
+    ports:
+      - "0.0.0.0:8000:8000"
+    volumes:
+      - ${MODELS_DIR}:/models:ro
+      - hf_cache:/root/.cache/huggingface
+    environment:
+      VLLM_SERVER_DEV_MODE: "1"       # /sleep and /wake_up. On this host the
+                                      # controller should reach for them sooner
+                                      # than anywhere else.
+      HF_HUB_OFFLINE: "1"
+      DO_NOT_TRACK: "true"
+    command:
+      - --model=/models/${SMALL_MODEL_DIR}
+      - --served-model-name=overflow-tier
+      - --host=0.0.0.0
+      - --port=8000
+      - --api-key=${VLLM_210_KEY}
+      - --quantization=awq_marlin
+      - --kv-cache-dtype=fp8          # Ada (CC 8.9), same as .87 and .226
+      - --gpu-memory-utilization=0.55 # Same version-dependent semantics warning
+                                      # as every other host: fraction of TOTAL or
+                                      # of FREE has varied. Measure it once
+                                      # (docs/07 section 7) and apply the answer
+                                      # everywhere.
+      - --max-model-len=16384
+      - --max-num-seqs=4
+      - --enable-sleep-mode
+      - --disable-log-requests
+    networks: [platform]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+        limits:
+          cpus: "4.0"
+          memory: 14G
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8000/health', timeout=5)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 240s
+
+  # ===========================================================================
+  #  FLEET AGENT -- ours (docs/08 section 7)
+  # ===========================================================================
+  #  Same agent as .226, one difference in configuration and it is the important
+  #  one: INTERACTIVE-LOGIN DETECTION IS ON HERE (see ../fleet.yaml). This is
+  #  somebody's daily machine; a new console session is a real signal that they
+  #  have sat down. On .87 the same trigger would pin the hub to its bottom rung
+  #  forever, because something is always logged into it.
+  #
+  #  Where the trigger is enabled it must fire on a NEW session, not on the mere
+  #  existence of one (docs/03 section 4.4).
+  # ===========================================================================
+  fleet-agent:
+    image: 10.0.0.87:5000/fleet-agent:${FLEET_AGENT_TAG}   # pulled across the
+    restart: unless-stopped                                  # subnet from the
+    <<: *logging                                             # registry on .87
+    ports:
+      # Controller only, and the controller is on the OTHER subnet -- the
+      # firewall rule here needs 10.0.0.87 explicitly (docs/08 section 7,
+      # M0 spike 4).
+      - "0.0.0.0:8099:8099"
+    environment:
+      AGENT_TOKEN: ${AGENT_TOKEN}
+      HOST_ID: "210"
+      VLLM_URL: http://vllm-small:8000
+      DETECT_INTERACTIVE_LOGIN: "true"    # see fleet.yaml; TRUE here, FALSE on
+                                          # the hub
+    volumes:
+      - agent_data:/data
+      - /proc:/host/proc:ro     # read-only. The controller has no authority to
+                                # kill anybody's process, least of all on this
+                                # machine.
+    networks: [platform]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+        limits:
+          cpus: "0.5"
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8099/healthz', timeout=3)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s

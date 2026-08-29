@@ -1,0 +1,231 @@
+# =============================================================================
+#  fleet.yaml -- the fleet controller's config
+#  Mounted read-only at /config/fleet.yaml by deploy/host-87/compose.yaml
+# =============================================================================
+#
+#  ONE file for the whole fleet, deliberately not per-host: the controller runs
+#  on .87 and needs to see every host at once to route around a claimed one. The
+#  compose files are per-host because they describe what runs where; this file is
+#  fleet-wide because the ladder is a fleet-wide decision.
+#
+#  >>> THE GOVERNING RULE, and everything here is bookkeeping around it <<<
+#
+#      footprint + headroom  <=  measured free VRAM
+#
+#      footprint = weights + KV cache budget + CUDA context
+#      headroom  = 1 GB when the host is FREE, 3 GB when SHARING
+#
+#  The band tables in docs/03 section 3 are a DERIVED SUMMARY FOR HUMANS, not the
+#  algorithm. If a table and this inequality ever disagree, the inequality wins --
+#  and they have disagreed before: an earlier revision of docs/03 gave
+#  "7-12 GB -> the 8B model", which would have left 1.5 GB of headroom rather
+#  than the promised 3. services/fleet-controller/tests/test_ladder.py encodes
+#  that bug as a regression test. Do not relax it without changing the policy doc
+#  first.
+#
+#  SCHEMA: this file is parsed into fleet_controller.models.HostConfig and Rung.
+#  Keys below are exactly those pydantic field names --
+#      Rung:       name, served_model, footprint_gb, always_on
+#      HostConfig: name, address, total_vram_gb, rungs, vllm_url,
+#                  detect_interactive_login, notes
+#  NOTE: docs/08 section 4.1 sketches a different shape for this file (id,
+#  agent_url, vram_total_mb, footprint_mb, litellm aliases, an explicit "off"
+#  rung). The code is the authority and this file follows the code; docs/08's
+#  sketch predates it and needs updating.
+#
+#  >>> EVERY FOOTPRINT BELOW IS A HYPOTHESIS. <<<  They are weights-only
+#  estimates from docs/02 section 3. Real footprints include the KV cache budget
+#  and the CUDA context, and must be confirmed against nvidia-smi once the rung
+#  is actually running (M0 spike 1, then M2). A rung whose configured footprint
+#  is smaller than its real one silently eats the headroom protecting somebody's
+#  job -- the one error this service must not make.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+#  Tunables. Every one of these is config; none of them is a literal in a
+#  function. Sources are docs/08 section 8.1.
+# -----------------------------------------------------------------------------
+tunables:
+  poll_interval_s: 2          # docs/03 s4.4. Three hosts at 2 s is 1.5 req/s
+                              # total; this loop must never be why anything is
+                              # slow.
+  settle_s: 60                # docs/03 s2. RE-SET THIS FROM M0 SPIKE 5. PyTorch's
+                              # caching allocator grows through warm-up: a job
+                              # that reads 4 GB at launch is routinely 11 GB a
+                              # minute later. Sizing against the first reading
+                              # claims VRAM their job is about to need -- and
+                              # then the platform is why their run died.
+  headroom_free_gb: 1.0       # asymmetric on purpose (docs/03 s2): a smaller
+  headroom_sharing_gb: 3.0    # model is an inconvenience, an eight-hour run
+                              # dying at hour six is not.
+  rung_change_gb: 2.0         # hysteresis: only move on a SUSTAINED change...
+  sustain_s: 60               # ...held this long...
+  top_rung_clear_s: 300       # ...and wait 5 minutes of a clear card before
+                              # returning to the top rung.
+  # EXCEPT DOWNWARD. If free VRAM falls below the headroom floor, demote
+  # immediately with no wait. Hysteresis exists to stop flapping, not to make us
+  # slow to get out of somebody's way -- without this bypass the rule directly
+  # contradicts test 3 in docs/03 section 7.
+  emergency_demote_bypasses_hysteresis: true
+  lease_idle_warn_s: 1500     # 25 min: a visible warning before...
+  lease_idle_release_s: 1800  # ...the 30 min auto-release. Forgetting to flip
+                              # the toggle back is the obvious failure mode, so
+                              # the system handles it rather than relying on
+                              # anyone's discipline (docs/03 s4.2).
+  yield_deadline_s: 10        # docs/03 s7 test 1. RE-SET FROM M0 SPIKE 6. If
+                              # measured sleep is worse than ~30 s, sleep mode is
+                              # not viable and the dashboard must say the real
+                              # number rather than quietly making people wait.
+  unreachable_after_polls: 3  # ~6 s, then the host goes UNKNOWN
+  agent_autonomy_after_s: 15
+  foreign_threshold_gb: 0.3   # above each host's measured idle baseline
+
+# -----------------------------------------------------------------------------
+#  Hosts
+# -----------------------------------------------------------------------------
+hosts:
+
+  # ===========================================================================
+  #  .226 -- the model host. Fast tier and (gated) deep tier.
+  # ===========================================================================
+  - name: "226"
+    address: 10.0.0.226
+    total_vram_gb: 24.0
+    vllm_url: http://10.0.0.226:8000
+    detect_interactive_login: true
+    notes: >-
+      RTX 4090 24 GB, TR PRO 32c/64t, 256 GB. Runs 8-13 hour simulation
+      modelling jobs that must not be measurably slowed (N6) -- that requirement
+      outranks everything the platform wants from this host. The deep tier
+      (ik_llama.cpp, port 8081) is NOT a rung: it is bandwidth-bound, competes
+      with the modelling runs for the exact resource they need, and there is no
+      sleep mode for a memory controller. It is gated on modelling-job state by
+      a separate state machine (docs/07 section 16), and running it at all
+      requires switching .wslconfig to the 180 GB profile, which restarts every
+      container on this host.
+    rungs:
+      # Derived thresholds while SHARING (footprint + 3 GB):
+      #   coder      needs >= 20.0 GB free
+      #   chat       needs >= 12.0 GB free
+      #   chat-small needs >=  8.5 GB free
+      #   chat-tiny  needs >=  6.0 GB free
+      #   below 6.0 GB the platform loads nothing and the gateway routes to .87.
+      - name: coder
+        served_model: qwen3-coder-30b-a3b-int4
+        footprint_gb: 17.0        # MoE: ~30B total, ~3B active per token, which
+        always_on: false          # is why it fits at all
+      - name: chat
+        served_model: qwen3-14b-int4
+        footprint_gb: 9.0
+        always_on: false
+      - name: chat-small
+        served_model: qwen3-8b-int4
+        footprint_gb: 5.5
+        always_on: false
+      - name: chat-tiny
+        served_model: qwen3-4b-int4
+        footprint_gb: 3.0
+        always_on: false
+    # ---- NOT RUNGS: image-generation admission control (docs/03, docs/15) ----
+    # ComfyUI has no sleep mode and its VRAM use is transient -- allocated per
+    # job, released afterwards -- so image work is governed at JOB ADMISSION, not
+    # by residency. Left as comments because it is not part of HostConfig; wire
+    # it in when mcp-tools grows the admission path.
+    #
+    #   >= 15 GB free   accept FLUX.1-schnell FP8   (~12 GB)
+    #   9-15 GB free    downgrade to SD3.5-medium   (~6 GB), and SAY SO in the
+    #                   result -- an unexplained quality drop erodes trust faster
+    #                   than an explained one
+    #   < 9 GB free     QUEUE, reporting "waiting for GPU" with a position
+    #
+    # NEVER preempt a coding session for an image. The 30B coder and FLUX cannot
+    # co-reside; image generation is the least important capability in the scope.
+
+  # ===========================================================================
+  #  .87 -- the hub. Embeddings, and the floor that never disappears.
+  # ===========================================================================
+  - name: "87"
+    address: 10.0.0.87
+    total_vram_gb: 12.0
+    vllm_url: http://10.0.0.87:8000
+    # >>> FALSE, and this is not an oversight. <<<
+    # .87 is the hub. It hosts the controller itself, and something is always
+    # logged into it. A naive "someone is logged in" trigger would pin this host
+    # to its bottom rung permanently (docs/03 section 4.4).
+    detect_interactive_login: false
+    notes: >-
+      RTX 4070 12 GB, i9-14900K, 128 GB. The least contended box, so it carries
+      everything that must stay up: Postgres, the gateway, Caddy, the registry,
+      RAGFlow and both of our services. Embeddings live here and are the one
+      thing that must never disappear -- with them down, ingestion stops and
+      every RAG query fails. They still get NO headroom exemption: losing them
+      costs us latency, starving the user's job costs them a day, and the CPU
+      fallback is what makes that trade acceptable. The reranker is pinned to
+      CPU for the same reason and is not a rung at all.
+    rungs:
+      - name: embed
+        served_model: qwen3-embedding-0.6b
+        footprint_gb: 1.2
+        # always_on: survives demotion where possible. Below 4.2 GB free even
+        # this goes, and embeddings fall back to CPU -- slower, but RAG never
+        # breaks. That outcome is designed to be impossible to avoid.
+        always_on: true
+      - name: chat-small
+        served_model: qwen3-4b-int4
+        footprint_gb: 5.0
+        always_on: false
+    # NOTE FOR WHOEVER WIRES always_on INTO THE SELECTOR: docs/03 section 3 says
+    # this host needs >= 9.2 GB free to run "embeddings + small chat", which is
+    # 1.2 + 5.0 + 3.0 -- i.e. the always_on rung's footprint counted ALONGSIDE
+    # the selected rung's. fleet_controller.ladder.select_rung() currently picks
+    # ONE rung and would choose chat-small at 8.0 GB free. Either the selector
+    # subtracts resident always_on footprints before choosing, or this host's
+    # band table is wrong. The inequality is the authority; make them agree and
+    # add the case to tests/test_ladder.py.
+
+  # ===========================================================================
+  #  .210 -- overflow and embeddings failover. Somebody's daily workstation.
+  # ===========================================================================
+  - name: "210"
+    address: 10.0.1.210
+    total_vram_gb: 12.0
+    vllm_url: http://10.0.1.210:8000
+    # >>> TRUE. This is the case the flag was invented for. <<<
+    # A named person uses this machine every day and has first claim on it. A
+    # new console session is a real signal that they have sat down. It must fire
+    # on a NEW session, not on the existence of one.
+    detect_interactive_login: true
+    notes: >-
+      RTX 4070 12 GB, i9-14900K, 96 GB, on the OTHER subnet (10.0.1.x) -- every
+      firewall rule and the controller's own reachability need both /24s, and
+      cross-subnet latency is M0 spike 4's question. Holds nothing critical by
+      design: burst chat capacity plus a GPU replica of the embeddings service,
+      which is the real prize because it turns embeddings' only fallback from
+      "CPU on .87" into a proper failover. Never the deep tier: CPU offload is
+      bandwidth-hungry and would make the machine sluggish for the person sitting
+      at it, which is precisely what the sharing policy exists to prevent. Treat
+      this host as the strictest case and prefer demoting early over squeezing an
+      extra rung.
+    rungs:
+      # Derived thresholds while SHARING:
+      #   chat-small needs >= 8.5 GB free
+      #   embed      needs >= 4.2 GB free
+      #   below 4.2 GB, nothing.
+      - name: embed
+        served_model: qwen3-embedding-0.6b
+        footprint_gb: 1.2
+        always_on: true       # the replica. Same model AND same revision as
+                              # .87's primary -- a replica on a different
+                              # revision produces silently incompatible vectors.
+      - name: chat-small
+        served_model: qwen3-8b-int4
+        footprint_gb: 5.5
+        always_on: false
+
+# =============================================================================
+#  .149 (10.0.1.149, RTX 5080 16 GB) is DEFERRED and deliberately absent.
+#  Image generation moved to .226 under admission control instead. Adding .149
+#  back is a native-Ubuntu install plus a host entry here and one compose
+#  directory; nothing in this file's structure needs revisiting.
+#  See docs/02 section 1 and delivery-plan.md section 5.
+# =============================================================================

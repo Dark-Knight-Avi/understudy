@@ -1,0 +1,539 @@
+# =============================================================================
+#  .226 -- 10.0.0.226 -- THE MODEL HOST
+#  RTX 4090 24 GB | TR PRO 9975WX 32c/64t | 256 GB DDR5-5600 | 8 TB + 2x4 TB NVMe
+#  Windows + WSL2
+# =============================================================================
+#
+#  >>> THE INCUMBENT TENANT COMES FIRST. <<<
+#  This box runs 8-13 hour long-running simulation jobs, and N6 says they must
+#  not be measurably slowed. Every cap in this file exists for that sentence.
+#  The acceptance test that matters most on this host is not a latency number --
+#  it is a modelling run whose per-iteration time stays within noise of its ~48
+#  minute baseline while the platform is up (docs/05 section 6.5, docs/18 s6).
+#
+#  If the platform ever becomes the reason a modelling run died, the correct
+#  response is `docker compose down`, not an argument. That is the social
+#  contract docs/03 encodes, and this file is the half of it that runs.
+#
+#  DEPLOY:      make deploy HOST=226
+#  ROLLBACK:    edit the *_TAG line in .env, then `docker compose up -d <service>`
+#  REMOVE:      docker compose down    -- back to a plain workstation in seconds
+#
+#  WSL2 FACTS (docs/05 sections 3 and 6):
+#   * The NVIDIA driver is passed through from Windows. NEVER install a Linux
+#     driver in the guest. This host reports CUDA 13.1, so the toolkit is
+#     cuda-toolkit-13-1 -- two hosts on two CUDA lines is a tax we accept rather
+#     than downgrade a driver on someone else's workstation.
+#   * Bind 0.0.0.0. With networkingMode=mirrored that is 10.0.0.226 on the LAN.
+#   * Weights are on the 8 TB NVMe, reached at native ext4 speed. Reading a
+#     100-250 GB GGUF across the WSL2/Windows filesystem boundary (/mnt/d, 9p)
+#     is slow enough to change the tokens/sec number (docs/05 section 6.3).
+#   * restart: unless-stopped does NOT survive a reboot on its own. WSL2 does not
+#     start at boot -- see the Task Scheduler section of ../README.md.
+#
+#  >>> THE .wslconfig INTERACTION -- THE MOST CONSEQUENTIAL THING ON THIS HOST <<<
+#  This file is written for the FAST-TIER profile:
+#
+#      fast-tier profile   processors=8    memory=48GB   swap=0   (default)
+#      deep-tier profile   processors=24   memory=180GB
+#
+#  The caps live in C:\Users\<you>\.wslconfig, not here, and they bound the whole
+#  guest -- Docker included. The container limits below carve up that 48 GB; they
+#  do not add to it.
+#
+#  The two profiles cannot both hold: Qwen3-235B-A22B Q4 needs ~130 GB of GUEST
+#  RAM for its experts, and the fast profile caps the guest at 48 GB (docs/02 s4,
+#  docs/03 section 6, docs/07 section 13). Switching between them requires
+#  `wsl --shutdown`, WHICH RESTARTS EVERY CONTAINER ON THIS HOST. That restart
+#  cost is precisely why the deep tier is a gated session rather than a permanent
+#  catalog entry, and why the ik-llama service below sits behind a Compose
+#  profile instead of starting with everything else.
+#
+#  Order of operations for a deep session (docs/07 section 13):
+#      1. Route `chat` and `coder` to .87 at the gateway FIRST
+#      2. Copy wslconfig-deep.ini over .wslconfig
+#      3. wsl --shutdown ; wsl -d Ubuntu-24.04 --exec /bin/true
+#      4. wsl -d Ubuntu-24.04 -- free -g     # verify ~180 BEFORE loading 130 GB
+#      5. docker compose --profile deep up -d
+#  and reverse it afterwards. Verify `nproc` and `free -g` after every switch.
+# =============================================================================
+
+name: aiplatform-226
+
+# -----------------------------------------------------------------------------
+#  NETWORKS
+# -----------------------------------------------------------------------------
+#  .226 has no egress boundary of its own to build -- there is nothing here that
+#  should ever reach the internet, and nothing here that talks to SearXNG. One
+#  internal network, and published ports for the hub to reach.
+#
+#  The inbound side of the two deliberate holes in .87's boundary terminates
+#  here: litellm -> :8000 and :8081, mcp-tools -> :8188, fleet-controller ->
+#  :8099. Those are the flows the M0/M8 packet capture must show, and NOTHING
+#  ELSE should be crossing between these hosts. The Windows firewall rules from
+#  docs/05 section 9 scope every published port below to 10.0.0.0/24 and
+#  10.0.1.0/24.
+# -----------------------------------------------------------------------------
+networks:
+  platform:
+    name: aiplatform-internal
+    driver: bridge
+    internal: true    # No route out. HF_HUB_OFFLINE below is the belt to this
+                      # brace: a model server that cannot reach Hugging Face
+                      # cannot silently re-download 17 GB over the 1 GbE link in
+                      # the middle of an incident.
+
+# -----------------------------------------------------------------------------
+#  VOLUMES -- removability (docs/18 section 7.2)
+# -----------------------------------------------------------------------------
+#  Named volumes only. Model weights are the exception and are NOT a volume:
+#  they are a read-only bind of the declared data directory ${MODELS_DIR}, which
+#  is deliberate -- `docker compose down -v` must not delete 250 GB of GGUFs that
+#  took two days to download. They are listed as residue in ../README.md instead,
+#  which is where a full uninstall picks them up.
+# -----------------------------------------------------------------------------
+volumes:
+  hf_cache:
+  comfy_output:
+  comfy_input:
+  agent_data:
+
+# -----------------------------------------------------------------------------
+#  GPU ACCESS AND RESOURCE CAPS
+# -----------------------------------------------------------------------------
+#  Every GPU service below carries its own full `deploy:` block rather than
+#  sharing an anchor, because on THIS host each one also needs its own
+#  `limits:` -- and a YAML merge key plus an explicit override of the same key is
+#  the sort of cleverness that reads wrong at 3 a.m.
+#
+#  reservations.devices with driver: nvidia is the only supported way to claim a
+#  GPU from Compose. Under WSL2 it works because the Windows driver is passed
+#  through at /usr/lib/wsl/lib and nvidia-container-toolkit is installed IN THE
+#  GUEST (docs/05 section 5.5). There is no Linux NVIDIA driver in this guest and
+#  there must never be one.
+#
+#  Note what `reservations` does NOT do: it does not partition the card. All four
+#  GPU services below see the whole 4090. Who actually gets VRAM is decided at
+#  runtime by the fleet controller (sleep/wake) and by admission control
+#  (ComfyUI). Docker has no mechanism for the policy in docs/03 -- which is
+#  precisely why the fleet controller exists.
+#
+#  `limits:` is H1 in file form: "the platform can never take more CPU or RAM
+#  than we allotted it." Compose v2 applies deploy.resources.limits outside
+#  Swarm; verify with `docker stats` rather than trusting a comment.
+# -----------------------------------------------------------------------------
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "50m"
+      max-file: "3"
+
+services:
+
+  # ===========================================================================
+  #  vLLM FAST TIER -- Qwen3-Coder-30B-A3B Int4 (docs/07 section 5)
+  # ===========================================================================
+  #  The top rung. MoE: ~30B total, ~3B active per token, which is why it fits
+  #  24 GB at Int4 and decodes at near-small-model speed.
+  #
+  #  Two aliases so the gateway's `coder` and `chat` entries hit one server.
+  #  Whether multiple --served-model-name values are accepted has varied between
+  #  vLLM versions: VERIFY, and if not, serve one alias and add the second entry
+  #  in LiteLLM (docs/07 section 5).
+  # ===========================================================================
+  vllm-fast:
+    image: vllm/vllm-openai:v0.9.1     # PIN, and match this host's CUDA line
+    restart: unless-stopped            # (13.1). A wheel built for the wrong CUDA
+    <<: *logging                       # minor fails as a missing symbol at
+    ipc: host                          # import. ipc: host -- vLLM needs a large
+                                       # /dev/shm.
+    ports:
+      - "0.0.0.0:8000:8000"
+    volumes:
+      - ${MODELS_DIR}:/models:ro       # 8 TB NVMe, read-only, native ext4 speed
+      - hf_cache:/root/.cache/huggingface
+    environment:
+      VLLM_SERVER_DEV_MODE: "1"        # exposes /sleep and /wake_up. The whole
+                                       # GPU-sharing policy rides on these two
+                                       # endpoints (docs/07 section 8). Their
+                                       # names and payloads HAVE MOVED between
+                                       # versions -- verify, then record the
+                                       # exact form in docs/07.
+      HF_HUB_OFFLINE: "1"
+      DO_NOT_TRACK: "true"
+    command:
+      - --model=/models/${CODER_MODEL_DIR}
+      - --served-model-name=coder
+      - --served-model-name=fast-tier
+      - --host=0.0.0.0
+      - --port=8000
+      - --api-key=${VLLM_226_KEY}      # layer 1: gateway -> backend. Without it
+                                       # the firewall is the only thing between
+                                       # the 4090 and anyone on the subnet.
+      - --quantization=awq_marlin      # the optimised Ada kernel for AWQ. The
+                                       # name differs per format (gptq_marlin,
+                                       # fp8); a wrong value is a slow path or a
+                                       # refusal to start.
+      - --dtype=auto
+      - --gpu-memory-utilization=0.90  # >>> THE FLAG THAT DECIDES WHETHER THE
+                                       # SHARING POLICY IS SAFE. <<< It is a
+                                       # fraction, but whether of TOTAL or of
+                                       # FREE VRAM has varied across vLLM
+                                       # versions. Measure it with the recipe in
+                                       # docs/07 section 7 and write the answer,
+                                       # the version tag and the date into that
+                                       # document BEFORE M2. Getting it wrong
+                                       # means the platform either wastes the
+                                       # card or OOMs somebody's job -- the exact
+                                       # outcome docs/03 exists to prevent.
+      - --max-model-len=65536          # a budget, not a maximum. Ask for 128k
+                                       # and there is no room for concurrency;
+                                       # N4 wants 2-4 streams first. Agentic
+                                       # clients are context-hungry, so this rung
+                                       # gets more than `chat` does.
+      - --max-num-seqs=8
+      - --kv-cache-dtype=fp8           # halves KV cost; Ada (CC 8.9) does FP8
+                                       # natively. A/B on the eval set before
+                                       # making it permanent.
+      - --enable-prefix-caching        # agentic clients resend near-identical
+                                       # prefixes constantly; close to free
+      - --enable-sleep-mode            # level 1 parks ~17 GB of weights in GUEST
+                                       # RAM -- inside the 48 GB cap, but not
+                                       # spaciously. Measure real RSS while
+                                       # asleep; that number decides how many
+                                       # rungs can stay resident (docs/07 s5).
+      - --swap-space=4                 # GiB, and it counts against the cap too
+      - --disable-log-requests         # a colleague's prompts do not belong in
+                                       # a container log
+    networks: [platform]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+        limits:
+          # H1: the platform can never take more CPU or RAM than we allotted.
+          # These carve up the 48 GB / 8 cores the .wslconfig fast profile gives
+          # the guest -- they do not add to it. Compose v2 applies
+          # deploy.resources.limits outside Swarm; verify with `docker stats`
+          # rather than trusting this comment.
+          cpus: "5.0"
+          memory: 32G
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8000/health', timeout=5)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
+      # OPEN QUESTION (docs/06 section 7, M0 spike 6): a vLLM in sleep mode still
+      # has an HTTP server listening. Whether it reports HEALTHY with its weights
+      # parked in RAM decides whether passive health checks are enough or whether
+      # the fleet controller must tell the gateway explicitly. Measure it and
+      # record the answer in docs/06 AND docs/07.
+
+  # ===========================================================================
+  #  vLLM FLOOR -- the lower rungs (docs/07 section 6)
+  # ===========================================================================
+  #  docs/07 section 6 recommends two vLLM services on this host: the 30B
+  #  coder/chat server and a small floor, with the controller sleeping and waking
+  #  them so exactly one is awake while sharing, and both asleep when the host is
+  #  fully claimed. Sleep/wake is seconds; stop/start is a cold load from NVMe
+  #  and kills in-flight requests, so it is not the routine path.
+  #
+  #  The cost is RAM: both servers' weights sit in the guest while asleep. ~17 GB
+  #  + ~5.5 GB inside a 48 GB cap. Measure both RSS figures before assuming it
+  #  fits (docs/07 section 5).
+  #
+  #  PORT NOTE: docs/05 section 4 lists only :8000 for .226. A second vLLM needs
+  #  a second port; :8001 is used here and needs adding to that table and to the
+  #  Windows firewall rule.
+  # ===========================================================================
+  vllm-floor:
+    image: vllm/vllm-openai:v0.9.1
+    restart: unless-stopped
+    <<: *logging
+    ipc: host
+    ports:
+      - "0.0.0.0:8001:8001"
+    volumes:
+      - ${MODELS_DIR}:/models:ro
+      - hf_cache:/root/.cache/huggingface
+    environment:
+      VLLM_SERVER_DEV_MODE: "1"
+      HF_HUB_OFFLINE: "1"
+      DO_NOT_TRACK: "true"
+    command:
+      - --model=/models/${FLOOR_MODEL_DIR}
+      - --served-model-name=floor-tier
+      - --host=0.0.0.0
+      - --port=8001
+      - --api-key=${VLLM_226_KEY}
+      - --quantization=awq_marlin
+      - --kv-cache-dtype=fp8
+      - --gpu-memory-utilization=0.25   # same measurement caveat as above
+      - --max-model-len=32768
+      - --max-num-seqs=4
+      - --enable-sleep-mode
+      - --disable-log-requests
+    networks: [platform]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+        limits:
+          cpus: "2.0"
+          memory: 10G
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8001/health', timeout=5)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 240s
+
+  # ===========================================================================
+  #  COMFYUI -- image generation, admission-controlled (docs/03, docs/15)
+  # ===========================================================================
+  #  Image generation moved here from the deferred .149, so it shares the 4090
+  #  with the fast tier. ComfyUI has NO sleep mode and its VRAM use is transient
+  #  (allocated per job, released afterwards), so it is governed at JOB
+  #  ADMISSION rather than by residency:
+  #
+  #      >= 15 GB free   FLUX.1-schnell FP8 (~12 GB)
+  #      9-15 GB free    SD3.5-medium / SDXL-Turbo (~6 GB)
+  #      < 9 GB free     QUEUE IT -- the MCP tool reports "waiting for GPU"
+  #
+  #  >>> NEVER PREEMPT A CODING SESSION FOR AN IMAGE. <<< The 30B coder (~17 GB)
+  #  and FLUX (~12 GB) cannot co-reside. An image request while the coder is
+  #  loaded must queue, not evict. Image generation is the least important
+  #  capability in the scope, and a queued image is a far better outcome than a
+  #  coding session that mysteriously got worse.
+  #
+  #  That decision lives in mcp-tools and the fleet controller, not here. This
+  #  service just has to be up and honest about what it is doing.
+  #
+  #  LICENCE, and it is not negotiable: FLUX.1-schnell (Apache-2.0) only. FLUX.1
+  #  [dev] is non-commercial and its paid path involves usage tracking through
+  #  the vendor's API -- that fails N2 and N1 at once (docs/15 section 4.2).
+  #
+  #  IMAGE: no upstream publishes a pinned ComfyUI image we would trust, so this
+  #  one is ours, built from a Dockerfile that pins the upstream commit recorded
+  #  in .env, and pulled from the registry on .87 like everything else we build.
+  # ===========================================================================
+  comfyui:
+    image: 10.0.0.87:5000/comfyui:${COMFYUI_TAG}
+    restart: unless-stopped
+    <<: *logging
+    ports:
+      - "0.0.0.0:8188:8188"
+    volumes:
+      - ${MODELS_DIR}/image:/models:ro   # FLUX.1-schnell FP8, SD3.5-medium
+      - comfy_output:/output
+      - comfy_input:/input
+    environment:
+      DO_NOT_TRACK: "true"
+      HF_HUB_OFFLINE: "1"
+    command:
+      - --listen=0.0.0.0
+      - --port=8188
+      - --output-directory=/output
+      - --input-directory=/input
+      # ComfyUI caches models in system RAM between runs and will happily hold
+      # several. Inside a 48 GB cap that matters -- keep one resident and prefer
+      # the low-RAM options to letting it swap. Flag names have been renamed more
+      # than once; confirm against the version you build (docs/15 section 4.1).
+      - --normalvram
+    networks: [platform]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+        limits:
+          cpus: "2.0"
+          memory: 8G
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8188/system_stats', timeout=5)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ===========================================================================
+  #  FLEET AGENT -- ours (docs/08 section 7)
+  # ===========================================================================
+  #  ~120 lines of FastAPI. GET /gpu returns total/used/free MB, the compute-apps
+  #  list, and a console-session flag. It can also ACT (sleep, wake, restart), so
+  #  read and write share one channel, one auth model and one open port.
+  #
+  #  KNOWN LIMITATION, stated because it is load-bearing: from inside the WSL2
+  #  guest, nvidia-smi sees the card but the process list is INCOMPLETE -- the
+  #  modelling job runs on the Windows side and its PID is not visible here.
+  #  docs/08 section 7 notes the agent can run on the Windows side instead, where
+  #  the process list is actually complete. If M0 spike 5 shows the in-guest view
+  #  cannot attribute foreign VRAM reliably, move this agent out of Docker and
+  #  onto Windows; the controller does not care which side answers.
+  #
+  #  PORT NOTE: docs/05 section 4 says the agent is on 8099; docs/08 section 7
+  #  says 9101 and writes the firewall rule for 9101. They disagree. This file
+  #  follows docs/05 (:8099) because that is the table every other document
+  #  references -- reconcile them and fix the firewall rule.
+  # ===========================================================================
+  fleet-agent:
+    image: 10.0.0.87:5000/fleet-agent:${FLEET_AGENT_TAG}
+    restart: unless-stopped
+    <<: *logging
+    ports:
+      # Controller only. The Windows firewall rule should allow 8099 from
+      # 10.0.0.87 and from nowhere else.
+      - "0.0.0.0:8099:8099"
+    environment:
+      AGENT_TOKEN: ${AGENT_TOKEN}
+      HOST_ID: "226"
+      # The agent drives sleep/wake on both local vLLM servers by service name.
+      VLLM_FAST_URL: http://vllm-fast:8000
+      VLLM_FLOOR_URL: http://vllm-floor:8001
+      COMFYUI_URL: http://comfyui:8188
+      # Crude and conservative on purpose (docs/07 section 16): a name-matched
+      # process list plus CPU and RAM thresholds, biased toward false positives.
+      # Being wrong in the "available" direction breaks N6, which is the
+      # requirement that decides whether the platform stays installed. Being
+      # wrong in the "refused" direction only annoys someone who wanted a slow
+      # model. The costs are not symmetric, so neither is the tuning.
+      MODELLING_PROCESS_NAMES: ${MODELLING_PROCESS_NAMES}
+    volumes:
+      - agent_data:/data
+      # Read-only view of the host process table, so the agent can spot a
+      # modelling job it can see. Read-only and nothing else: the controller
+      # explicitly has no authority to kill anybody's process (docs/08 s1).
+      - /proc:/host/proc:ro
+    networks: [platform]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+        limits:
+          cpus: "0.5"
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8099/healthz', timeout=3)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ===========================================================================
+  #  DEEP TIER -- ik_llama.cpp, Qwen3-235B-A22B Q4 (docs/07 sections 10-16)
+  # ===========================================================================
+  #  >>> DOES NOT START WITH THE REST OF THE STACK. <<<
+  #      docker compose --profile deep up -d ik-llama
+  #
+  #  A Compose profile is the right tool for exactly this and nothing else here.
+  #  It is NOT the "one file with conditional profiles" that delivery-plan
+  #  section 2 rejects -- that argument was about hosts. This is one service that
+  #  physically cannot run under the default memory profile: the experts need
+  #  ~130 GB of GUEST RAM and the fast .wslconfig caps the guest at 48 GB.
+  #  Starting it by accident gets you an OOM, and starting it deliberately means
+  #  you already switched profiles and restarted every container on this host.
+  #
+  #  It is a SESSION, not a service (docs/07 section 13): brought up for a block
+  #  of work and taken down. That fits its use -- a hard bug, a design review, a
+  #  long document; not autocomplete.
+  #
+  #  >>> THE GATE (docs/07 section 16) <<<  The GPU ladder does not apply. This
+  #  tier is bandwidth-bound and competes with the modelling runs for the exact
+  #  resource those runs need, and there is no sleep mode for a memory
+  #  controller. Availability is decided by modelling-job state:
+  #      modelling job running   -> REFUSED, with a human-readable message and NO
+  #                                 fallback. A user who chose the slow careful
+  #                                 model and got a 4B answer has been lied to.
+  #      quiet >= 15 min          -> available on request, one at a time, queued
+  #      off-hours window         -> available; this is the window we advertise
+  #  A running deep session is never preempted mid-generation. Refuse NEW
+  #  requests when a modelling job appears; let the current answer finish.
+  #
+  #  MUST NOT BE ADVERTISED TO ANYONE before M0 spike 7 has a verdict. If the
+  #  spike shows this starving the modelling runs, `deep-slow` comes out of the
+  #  catalog and this service is deleted. Nothing else depends on it.
+  #
+  #  IMAGE: ik_llama.cpp is a fork with its own flags and its own MoE quant
+  #  types, both drifting from mainline. There is no upstream image. Ours is
+  #  built from a PINNED COMMIT recorded in .env -- an unpinned fork is an
+  #  unreproducible deploy. docs/07 section 11 says prove the concept on mainline
+  #  llama.cpp first; failing back to mainline stays available.
+  # ===========================================================================
+  ik-llama:
+    profiles: ["deep"]
+    image: 10.0.0.87:5000/ik-llama:${IK_LLAMA_TAG}   # built from ${IK_LLAMA_COMMIT}
+    restart: unless-stopped
+    <<: *logging
+    ipc: host
+    ports:
+      - "0.0.0.0:8081:8081"      # docs/05 section 4 and docs/06 section 5 both
+                                 # say 8081. The repo-root .env.example says
+                                 # DEEP_TIER_URL=...:8080 -- that is wrong; 8081.
+    volumes:
+      - ${MODELS_DIR}:/models:ro
+    command:
+      - --model=/models/${DEEP_MODEL_FILE}
+      - --n-cpu-moe=${DEEP_N_CPU_MOE}    # THE flag that matters: how many MoE
+                                         # layers keep their experts in system
+                                         # RAM. The optimum is the SMALLEST value
+                                         # that still fits, since every layer
+                                         # left on the GPU is faster. Sweep it
+                                         # (docs/07 section 15).
+      - --n-gpu-layers=99                # attention and shared weights to the
+                                         # GPU; --n-cpu-moe claws the experts
+                                         # back. Used together, not as
+                                         # alternatives.
+      - --ctx-size=${DEEP_CTX}           # KV cache is on the GPU, so this
+                                         # competes with the 24 GB directly.
+                                         # Start at 32k, raise while VRAM allows.
+      - --threads=${DEEP_THREADS}        # a GUESS until measured. Decode is
+                                         # bandwidth-bound: past the point where
+                                         # the memory controllers saturate, extra
+                                         # threads add contention, not tokens.
+                                         # The measured optimum may be well below
+                                         # the 24 in the docs.
+      - --host=0.0.0.0
+      - --port=8081
+      - --api-key=${VLLM_226_KEY}        # same key discipline as vLLM. Do not
+                                         # leave this open on the LAN.
+      - --no-mmap                        # resident is more predictable than page
+                                         # cache with ~180 GB available. If
+                                         # start-up RAM pressure bites, drop it
+                                         # and let mmap page from the NVMe --
+                                         # measure both.
+    networks: [platform]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+        limits:
+          # Only meaningful under the DEEP .wslconfig profile (24 cores/180 GB).
+          # Under the fast profile this service will not fit and must not start,
+          # which is what `profiles: ["deep"]` above is for.
+          cpus: "22.0"
+          memory: 160G
+    healthcheck:
+      # This image is a C++ binary, not python; the Dockerfile must include curl
+      # for this check (or swap it for a llama-server /health probe you verify).
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8081/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 900s   # loading ~130 GB from NVMe with --no-mmap is minutes
