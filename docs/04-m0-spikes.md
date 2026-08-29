@@ -92,7 +92,10 @@ deep-tier-only via `ik_llama.cpp`, which is far less CUDA-intensive.
 
 ---
 
-## Spike 3 — `.149`: native Ubuntu and Blackwell support
+## Spike 3 — `.149`: native Ubuntu and Blackwell support  *(OPTIONAL — deferred)*
+
+> `.149` is no longer on the critical path. Image generation runs on `.226` under admission control
+> instead. Run this spike only if you decide to add `.149` back as a dedicated image host.
 
 `.149` has **no WSL installed**, and the reported WSL2 CUDA memory-overhead problem is specific to
 Blackwell / `sm_120` — which is exactly this GPU. **Install native Ubuntu and skip the whole class of
@@ -119,16 +122,16 @@ The whole three-host design assumes it can. Verify before designing around it.
 
 ```bash
 # From .87 (the hub) to .149
-ping -c 10 10.0.1.149
-traceroute 10.0.1.149
+ping -c 10 10.0.1.210
+traceroute 10.0.1.210
 
 # Bandwidth, both directions
 iperf3 -s                      # on .149
-iperf3 -c 10.0.1.149 -t 30   # from .87
-iperf3 -c 10.0.1.149 -t 30 -R
+iperf3 -c 10.0.1.210 -t 30   # from .87
+iperf3 -c 10.0.1.210 -t 30 -R
 ```
 
-Run it for **both** `.19` hosts: `10.0.1.149` and `10.0.1.210`.
+Run it for `10.0.1.210`. (`.149` too, only if you decide to add it back — it is deferred.)
 
 > **ICMP is filtered on some of these hosts.** A failed ping is not a failed spike — the script
 > treats TCP as authoritative. Early probing from the dev laptop already showed all four hosts
@@ -242,7 +245,7 @@ shipping something nobody wants to wait for.
 | 1 | `.226` usable VRAM | GiB allocatable | >= 21 | | |
 | 1b | `.210` usable VRAM | GiB allocatable, during a normal working day | measured | | |
 | 2 | `.226` CUDA soak | 2 h clean | pass | | |
-| 3 | `.149` Blackwell | `sm_120` present | pass | | |
+| 3 | `.149` Blackwell *(optional)* | `sm_120` present | pass | | |
 | 4 | Cross-subnet link `.149` | Mbit/s, latency | >= 500, < 5 ms | | |
 | 4b | Cross-subnet link `.210` | Mbit/s, latency | >= 500, < 5 ms | | |
 | 5 | Workload peak VRAM | GB | bounded + known | | |

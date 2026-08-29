@@ -198,7 +198,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     rag_url: str = "http://rag:8001"
     searxng_url: str = "http://searxng:8080"
-    comfyui_url: str = "http://10.0.1.149:8188"     # different subnet - see M0 spike 4
+    comfyui_url: str = "http://10.0.0.226:8188"     # shares the 4090; admission-controlled
     fleet_url: str = "http://fleet-controller:8090"
     mcp_token: str                                     # required; from .env, never committed
     artifact_dir: str = "/data/artifacts"
@@ -345,7 +345,7 @@ if __name__ == "__main__":
     environment:
       RAG_URL: http://rag:8001
       SEARXNG_URL: http://searxng:8080
-      COMFYUI_URL: http://10.0.1.149:8188
+      COMFYUI_URL: http://10.0.0.226:8188
       FLEET_URL: http://fleet-controller:8090
       MCP_TOKEN: ${MCP_TOKEN}                   # from .env, gitignored
       WEB_SEARCH_ENABLED: "false"               # ADR-0004 default

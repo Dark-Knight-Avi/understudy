@@ -189,7 +189,7 @@ sudo iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 
 # LAN peers we legitimately talk to
 sudo iptables -A OUTPUT -d 10.0.0.0/24 -j ACCEPT      # local subnet (.226, clients)
-sudo iptables -A OUTPUT -d 10.0.1.149/32 -j ACCEPT    # ComfyUI, other subnet
+sudo iptables -A OUTPUT -d 10.0.0.226/32 -j ACCEPT    # ComfyUI (image gen shares the 4090)
 
 # The single egress exception: the SearXNG container's address
 sudo iptables -A OUTPUT -s <searxng-container-ip>/32 -p tcp --dport 443 -j ACCEPT

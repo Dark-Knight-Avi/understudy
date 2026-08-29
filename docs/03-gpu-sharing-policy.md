@@ -107,17 +107,29 @@ costs them a day.
 Treat this host as the strictest case. Its owner has first claim, uses it daily, and did not ask for
 a platform to live on it. Prefer demoting early here over squeezing an extra rung.
 
-### `.149` — RTX 5080, 16 GB
+### Image generation — admission control on `.226`
 
-ComfyUI has **no sleep mode**, and its VRAM use is transient — it allocates per job and releases
-afterwards. So this host's rung is enforced at **job admission**, not by what is resident: check free
-VRAM when a request arrives and refuse or downgrade it there.
+ComfyUI has **no sleep mode**, and its VRAM use is transient: it allocates per job and releases
+afterwards. So image work is governed at **job admission** rather than by residency — check free
+VRAM when a request arrives, and accept, downgrade or refuse it there.
+
+It runs on `.226`, sharing the 4090 with the fast tier.
 
 | Free VRAM at admission | Platform accepts |
 |---|---|
 | >= 15 GB | FLUX.1-schnell FP8 (~12 GB) |
 | 9–15 GB | SD3.5-medium / SDXL-Turbo (~6 GB) |
-| < 9 GB | Refuse; the MCP tool returns a clear "unavailable, host in use" |
+| < 9 GB | **Queue it.** The MCP tool reports "waiting for GPU", with position |
+
+**Never preempt a coding session for an image.** The 30B coder (~17 GB) and FLUX (~12 GB) cannot
+co-reside, so an image request while the coder is loaded must queue, not evict. Image generation is
+the least important capability in the scope; interrupting someone mid-task for it would be a poor
+trade, and a queued image is a far better outcome than a coding session that mysteriously got worse.
+
+> **`.149` (RTX 5080, 16 GB) is optional and not on the critical path.** It would be the dedicated
+> image host and would remove the contention above, but it needs a destructive native-Ubuntu install
+> and an approval we do not have. Adding it later is a config change plus that install; nothing in
+> the design needs revisiting. See [`02-hardware-and-fleet.md`](./02-hardware-and-fleet.md).
 
 ### Why this is safe overall
 

@@ -33,8 +33,18 @@ reranker, the app services. Its 12 GB carries only the small models that must ne
 embeddings above all, since nothing in RAG works without them. It is also the least contended box, so
 it is where anything that must stay up belongs.
 
-**`.149` does image generation.** 32 GB of system RAM rules out hosting data services, and it sits on
-another subnet. Image generation is bursty, self-contained, and tolerates both.
+**`.149` is optional, and deferred.** It would be the dedicated image host — its RTX 5080 is the only
+card that holds FLUX.1-schnell with room to spare. But it is the most expensive host in the fleet to
+onboard: a destructive native-Ubuntu install on a lab machine, an approval we do not have, Blackwell
+(`sm_120`) toolchain verification, and only 32 GB of system RAM so it can host nothing else.
+
+Against that, `.226` can generate the same images with the same model at **no quality loss** — only
+reduced availability, since FLUX (~12 GB) and the 30B coder (~17 GB) cannot co-reside. Image
+generation is comfortably the least important capability in the scope, so trading "always available"
+for "available when the 4090 is free, queued otherwise" is the right call.
+
+So `.149` is documented, not deployed. If image generation turns out to matter more than expected,
+adding it back is the Ubuntu install plus a config change.
 
 **`.210` is elastic overflow, and deliberately holds nothing critical.** It is assigned to a named
 person and is their daily machine, which makes it the least reliable host in the fleet -- not because

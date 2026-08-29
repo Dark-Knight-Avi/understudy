@@ -60,9 +60,8 @@ revised after each ships so they describe what actually shipped rather than what
 | **M3** | Coding — OpenCode + Cline on local models | Blocked |
 | **M4** | Deep tier — near-frontier models via CPU offload | Blocked on M0 spike 7 |
 | **M5** | RAG — integrate RAGFlow, gate wrapper if needed | Blocked on M1.5 |
-| **M6** | Tools — web search, PDF, PPTX via MCP | Blocked |
-| **M7** | Image generation | Blocked on `.149` Ubuntu approval |
-| **M8** | Hardening — SSO, backups, monitoring, egress proof | Blocked |
+| **M6** | Tools — web search, PDF, PPTX, image via MCP | Blocked |
+| **M7** | Hardening — SSO, backups, monitoring, egress proof | Blocked |
 
 Design docs for every milestone are written. **No code exists yet** — deliberately, because M0's
 measurements can still change the model ladder, the WSL2 layout, and whether the deep tier is viable
@@ -71,8 +70,7 @@ at all.
 ## Start here
 
 1. Run [`04-m0-spikes.md`](./04-m0-spikes.md) — 1–2 days, seven measurements with pass/fail gates.
-2. **Raise the `.149` native-Ubuntu request the same day.** It is the longest lead time in the plan
-   and it blocks M7 entirely.
+2. **Install uv inside WSL2** on `.226`, `.87` and `.210` so the spikes can run there.
 3. **Start the ~50-question eval set** ([`17-evaluation.md`](./17-evaluation.md)). It must be authored
    before the retriever exists, or it only measures what already worked.
 4. **Rotate the three host passwords** — they were shared in plaintext during design.

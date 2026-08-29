@@ -141,15 +141,15 @@ Everything else registers with it, so it exists before anything else is useful.
 3. vLLM, model weights on the 8 TB NVMe
 4. Register with the gateway on `.87`
 
-### `.149` last — and start the paperwork now
+### `.210` third — overflow and embeddings failover
 
-Blocked on approval to install native Ubuntu, so **raise that request during M0**, not at M7. Its
-lead time is the longest thing in this plan and it is pure waiting.
+Same WSL2 setup and caps. This is somebody's daily workstation, so it holds nothing critical: a small
+chat model and a GPU replica of the embeddings service.
 
-1. Native Ubuntu (skips the Blackwell/WSL2 memory-overhead problem entirely)
-2. Verify `sm_120` kernels in your PyTorch/ComfyUI builds
-3. ComfyUI + FLUX.1-schnell
-4. Register with the gateway
+### `.149` — not in scope
+
+Optional and deferred. Image generation runs on `.226` under admission control instead. Adding
+`.149` later is a native-Ubuntu install plus a config change; nothing in the design needs revisiting.
 
 ---
 
@@ -166,9 +166,8 @@ Effort assumes focused days. Part-time, multiply by two to three.
 | **M3** | Coding | `.226` | OpenCode + Cline config; context tuning | `09-coding-agents` | A real task completed end-to-end in both clients | 2–3 d |
 | **M4** | Deep tier | `.226` | `ik_llama.cpp`, 235B weights, gating on modelling state | `07-inference-servers` §deep | Deep model in the catalog; modelling runs unaffected | 3–5 d |
 | **M5** | RAG | `.87` | Integrate RAGFlow; relevance-gate wrapper only if the spike needs it | ADR-0007, `12` if wrapping | Cited answers; recall@5 on the eval set | **2–4 d** (12 d if the spike fails) |
-| **M6** | Tools | `.87` | **MCP server**: search, PDF, PPTX; SearXNG | `14`, `15`, `16` | One tool invoked from all three clients | 4–6 d |
-| **M7** | Image | `.149` | Ubuntu, ComfyUI, FLUX.1-schnell, MCP tool | `15` §image | Image generated from chat and terminal | 2–3 d |
-| **M8** | Hardening | all 3 | Backups, monitoring, egress lockdown, boot resilience | `17`, `18` | Egress proof; reboot test; eval set green | 4–6 d |
+| **M6** | Tools | `.87`, `.226` | **MCP server**: search, PDF, PPTX; SearXNG; ComfyUI on `.226` under admission control | `14`, `15`, `16` | One tool invoked from all three clients; an image generated without disturbing a coding session | 5–7 d |
+| **M7** | Hardening | all 3 | Backups, monitoring, egress lockdown, boot resilience | `17`, `18` | Egress proof; reboot test; eval set green | 4–6 d |
 
 **Total: roughly 4–6 focused weeks** with RAGFlow adopted; 6–9 if the M1.5 spike fails and M5 is
 built. That single day of spiking is the highest-leverage hour in the plan.
@@ -191,7 +190,6 @@ Three things can proceed independently of the critical path:
 
 | Track | Start | Runs alongside | Why it can be parallel |
 |---|---|---|---|
-| `.149` Ubuntu approval + install | M0 | M1–M6 | Pure waiting on other people |
 | Deep-tier weight downloads (100–250 GB) | M0 | M1–M3 | Bandwidth, not attention |
 | Eval-set authoring (~50 Q&A pairs) | M1 | M2–M4 | Needs the corpus, not the code. **The most commonly skipped and most valuable prep** |
 

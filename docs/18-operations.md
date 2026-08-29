@@ -405,7 +405,7 @@ check "mcp tools (.87)"      http://10.0.0.87:8200/health          "ok"
 check "fleet ctrl (.87)"     http://10.0.0.87:8300/api/fleet       "226"
 check "searxng (.87)"        http://10.0.0.87:8888/healthz         ""
 check "vllm (.226)"          http://10.0.0.226:8000/health         ""
-check "comfyui (.149)"       http://10.0.1.149:8188/system_stats   ""
+check "comfyui (.226)"       http://10.0.0.226:8188/system_stats   ""
 
 # Postgres needs a real query, not a port check
 docker exec aiplatform-postgres pg_isready -U aiplatform >/dev/null 2>&1 \

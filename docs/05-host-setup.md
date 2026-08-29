@@ -480,7 +480,13 @@ that matters most.
 
 ---
 
-## 7. `.149` — native Ubuntu (10.0.1.149, RTX 5080 16 GB, i9-14900K, 32 GB)
+## 7. `.149` — native Ubuntu  *(OPTIONAL — deferred, not on the critical path)*
+
+> Image generation moved to `.226` under admission control, so this host is documented but not
+> deployed. Follow this section only if you add `.149` back as a dedicated image host.
+> See [`02-hardware-and-fleet.md`](./02-hardware-and-fleet.md).
+
+### `.149` — 10.0.1.149, RTX 5080 16 GB, i9-14900K, 32 GB
 
 Different subnet, different GPU generation, different OS. Do this host last, and only after
 [`04-m0-spikes.md`](./04-m0-spikes.md) spike 4 confirms `.32.x` can actually reach `.149`.

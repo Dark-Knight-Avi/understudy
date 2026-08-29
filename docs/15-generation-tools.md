@@ -2,6 +2,12 @@
 
 > **Pre-build draft.** Written ahead of the milestone; revise after it ships to describe what actually shipped.
 
+> **Changed since writing:** `.149` was dropped from the critical path, so **ComfyUI runs on `.226`**
+> alongside the fast tier, governed by admission control rather than owning a card
+> ([`03-gpu-sharing-policy.md`](./03-gpu-sharing-policy.md)). The model choice is unchanged —
+> FLUX.1-schnell, Apache-2.0. Read every `.149` reference below as `.226`, and note the new rule:
+> an image request never preempts a coding session, it queues.
+
 > The three artefact-producing tools behind [`14-mcp-tool-server.md`](./14-mcp-tool-server.md).
 > PDF and PPTX ship in **M6** on `.87`; image ships in **M7** on `.149`. Together they satisfy F9.
 
