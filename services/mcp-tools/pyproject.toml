@@ -1,0 +1,27 @@
+[project]
+name = "mcp-tools"
+version = "0.1.0"
+description = "One MCP tool surface for Open WebUI, OpenCode and Cline: five tools, one token, one log"
+requires-python = ">=3.11"
+dependencies = [
+    # docs/14 names FastMCP; in mcp 2.x that class is `MCPServer` and
+    # `mcp.server.fastmcp` raises on import. Same framework, new name.
+    "mcp>=2.1,<3",
+    "httpx>=0.27",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.5",
+    "python-pptx>=1.0",
+    "anyio>=4.4",
+    "starlette>=0.40",
+    "uvicorn[standard]>=0.32",
+]
+
+[project.scripts]
+mcp-tools = "mcp_tools.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mcp_tools"]
