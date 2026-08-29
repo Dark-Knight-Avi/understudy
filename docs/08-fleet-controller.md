@@ -209,26 +209,25 @@ def choose_rung(host: Host, free_mb: int, state: State) -> Rung:
 Four lines, and they are the whole ladder. Note what is *not* there: no memory of what was loaded
 before, no requested model name, no fixed plan. Measured free VRAM against a sorted list.
 
-**This differs slightly from the spec's band tables, and the difference is deliberate.**
-[`03`](./03-gpu-sharing-policy.md) §3 gives bands (`>= 20 GB -> 30B`, `12–20 GB -> 14B`,
-`7–12 GB -> 8B`, `4–7 GB -> 4B`, `< 4 GB -> nothing`). At the *top* of each band the arithmetic
-agrees; at the *bottom* it does not. With 7 GB free, the band says load the 8B — but
-5.5 + 3 = 8.5 GB, so honouring the band leaves 1.5 GB of headroom, not 3 GB.
+**The bands in [`03`](./03-gpu-sharing-policy.md) §3 are derived from this constraint, not the other
+way round.** They originally disagreed with it: an earlier revision gave `7–12 GB -> 8B`, but
+5.5 + 3 = 8.5 GB, so loading the 8B at 7 GB free would have left 1.5 GB of headroom rather than 3.
+`03` has since been corrected to match, and the two now agree — but the constraint remains the
+authority. If a band table and this inequality ever diverge again, the inequality wins.
 
-The constraint wins. `footprint + headroom <= free` is the rule the user's job depends on; the bands
-are a readable summary of it. Effective thresholds for `.226` while sharing:
+Effective thresholds for `.226` while sharing:
 
-| Rung | Footprint | + 3 GB headroom | Loads at free VRAM of | Spec band said |
-|---|---|---|---|---|
-| Qwen3-Coder-30B-A3B Int4 | ~17 GB | ~20 GB | >= 20 GB | 20 GB — agrees |
-| Qwen3-14B Int4 | ~9 GB | ~12 GB | >= 12 GB | 12 GB — agrees |
-| Qwen3-8B Int4 | ~5.5 GB | ~8.5 GB | >= 8.5 GB | 7 GB — **1.5 GB stricter** |
-| Qwen3-4B Int4 | ~3 GB | ~6 GB | >= 6 GB | 4 GB — **2 GB stricter** |
-| nothing | 0 | — | below 6 GB | below 4 GB |
+| Rung | Footprint | + 3 GB headroom | Loads at free VRAM of |
+|---|---|---|---|
+| Qwen3-Coder-30B-A3B Int4 | ~17 GB | ~20 GB | >= 20 GB |
+| Qwen3-14B Int4 | ~9 GB | ~12 GB | >= 12 GB |
+| Qwen3-8B Int4 | ~5.5 GB | ~8.5 GB | >= 8.5 GB |
+| Qwen3-4B Int4 | ~3 GB | ~6 GB | >= 6 GB |
+| nothing | 0 | — | below 6 GB |
 
-The lower rungs engage slightly later than the band table implies. That is the safe direction, it
-costs a small model nobody would have enjoyed, and it keeps one rule in one place. **Surface the
-effective thresholds on the dashboard** so the behaviour is inspectable rather than mysterious.
+Footprints are **weights-only estimates**; the real figure includes the KV cache budget and must be
+measured per rung ([`07`](./07-inference-servers.md)). **Surface the effective thresholds on the
+dashboard** so the behaviour is inspectable rather than mysterious.
 
 ### 4.3 The other two hosts
 
