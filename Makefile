@@ -17,8 +17,12 @@ help:  ## show this help
 # ---------------------------------------------------------------- development
 
 .PHONY: setup
-setup:  ## install dependencies (uv workspace)
-	uv sync --all-groups
+setup:  ## dev machine: services + tooling, no CUDA torch
+	uv sync --group dev
+
+.PHONY: setup-spikes
+setup-spikes:  ## hosts only: adds PyTorch w/ CUDA (~2.5 GB) for the M0 spikes
+	uv sync --group spikes
 
 .PHONY: lint
 lint:  ## ruff + mypy

@@ -33,7 +33,9 @@ def vram_used_mib() -> int:
     """Whole-GPU used memory, as the fleet controller will see it."""
     out = subprocess.run(
         ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return int(out.stdout.strip().splitlines()[0])
 
@@ -96,9 +98,12 @@ def main() -> None:
         wake_total = time.time() - t1
 
     verdict = (
-        "FAIL (never released)" if freed is None
-        else "PASS" if freed <= 10
-        else "ACCEPTABLE" if freed <= 30
+        "FAIL (never released)"
+        if freed is None
+        else "PASS"
+        if freed <= 10
+        else "ACCEPTABLE"
+        if freed <= 30
         else "DEGRADED -- sleep mode not viable, fall back to stop/restart"
     )
 
