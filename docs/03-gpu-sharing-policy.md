@@ -87,9 +87,15 @@ algorithm — if a table and this inequality ever disagree, the inequality wins.
 
 | Free VRAM | Platform loads |
 |---|---|
-| >= 9.2 GB | Embeddings (~1.2 GB) + small chat model (~5 GB) |
-| 4.2–9.2 GB | Embeddings only |
+| >= 9.7 GB | Embeddings (~1.2 GB) + Qwen3-8B Int4 (~5.5 GB) |
+| 4.2–9.7 GB | Embeddings only |
 | < 4.2 GB | Embeddings fall back to **CPU** — slower, but RAG never breaks |
+
+> Was 9.2 GB, computed from a hand-waved "~5 GB small chat model" that matched no
+> real build — 4B Int4 is ~3.0 GB, 8B Int4 is ~5.5 GB, nothing is 5.0. `chat-small`
+> now means the same 8B model on every host, because a catalog name that resolves
+> to different quality depending on routing is worse than a slightly higher
+> threshold. These figures are generated from `select_loadout`, not written by hand.
 
 Embeddings are the one thing that must never disappear: with them down, ingestion stops and every RAG
 query fails. The CPU fallback exists so that outcome is impossible — which is also why embeddings get
