@@ -30,17 +30,38 @@ def _fits(footprint_gb: float, budget_gb: float) -> bool:
 
 
 def select_rung(rungs: tuple[Rung, ...], free_gb: float, state: HostState) -> Rung | None:
-    """Largest rung that fits, or None if nothing does.
+    """Largest *swappable* rung that fits, or None if nothing does.
+
+    `always_on` rungs are excluded from the candidates. They are not alternatives
+    to a chat model, they are permanent residents -- embeddings on `.87` stay loaded
+    underneath whatever chat rung is chosen, because losing them stops ingestion and
+    every RAG query. Treating one as a candidate would have the host "choose"
+    embeddings *instead of* chat and call that a rung change.
+
+    `free_gb` is expected to already exclude any resident always_on model, which is
+    what nvidia-smi reports. The caller adds back only the swappable rung it holds
+    (see `state._available_gb`); the always_on footprint stays subtracted because it
+    stays loaded.
 
     UNKNOWN never loads anything: if we cannot see the card, assume it is in use.
     """
     if state in (HostState.YIELDING, HostState.UNKNOWN):
         return None
     budget = free_gb - state.headroom_gb
-    for rung in sorted(rungs, key=lambda r: r.footprint_gb, reverse=True):
+    swappable = (r for r in rungs if not r.always_on)
+    for rung in sorted(swappable, key=lambda r: r.footprint_gb, reverse=True):
         if _fits(rung.footprint_gb, budget):
             return rung
     return None
+
+
+def always_on_rungs(rungs: tuple[Rung, ...]) -> tuple[Rung, ...]:
+    """Rungs that stay resident in every state except YIELDING and UNKNOWN.
+
+    The control loop loads these independently of rung selection. Smallest first,
+    so a host that can only afford one keeps the cheapest.
+    """
+    return tuple(sorted((r for r in rungs if r.always_on), key=lambda r: r.footprint_gb))
 
 
 def select_loadout(rungs: tuple[Rung, ...], free_gb: float, state: HostState) -> tuple[Rung, ...]:

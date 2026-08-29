@@ -99,6 +99,12 @@ class HostConfig(BaseModel):
         return v
 
 
+# Below this, "foreign" VRAM is noise -- a desktop compositor, a driver allocation.
+# Yielding a whole host to 200 MiB of window manager would pin it off permanently,
+# the same failure shape as naive interactive-login detection.
+FOREIGN_NOISE_FLOOR_GB = 0.3
+
+
 class GpuSample(BaseModel):
     """One reading of a GPU, as nvidia-smi reports it."""
 
@@ -108,7 +114,19 @@ class GpuSample(BaseModel):
     total_gb: float
     used_gb: float
     foreign_pids: tuple[int, ...] = ()
-    """CUDA processes that are not ours. The trigger for yielding."""
+    """CUDA processes that are not ours, by enumeration."""
+    foreign_used_gb: float | None = None
+    """VRAM in foreign hands by *subtraction* (`used - ours - baseline`), if known.
+
+    Two signals, because either alone is blind somewhere. Enumeration misses
+    processes the sampler cannot see -- under WSL2 the Linux-side process list does
+    not show Windows-side CUDA work, so a card genuinely holding someone's 8 GB job
+    can enumerate as empty. Subtraction catches that but cannot say whose it is, and
+    it misreads if our own footprint is misconfigured.
+
+    `None` means the sampler could not compute it, which is not the same as zero and
+    must never be read as "nothing foreign".
+    """
     sampled_at: datetime
 
     @property
@@ -117,7 +135,11 @@ class GpuSample(BaseModel):
 
     @property
     def has_foreign_process(self) -> bool:
-        return bool(self.foreign_pids)
+        """Either signal is enough. Yielding wrongly costs capability; not yielding
+        costs somebody their job, so the disjunction is the safe direction."""
+        if self.foreign_pids:
+            return True
+        return self.foreign_used_gb is not None and self.foreign_used_gb > FOREIGN_NOISE_FLOOR_GB
 
 
 class HostStatus(BaseModel):
