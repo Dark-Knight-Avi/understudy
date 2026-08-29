@@ -252,6 +252,21 @@ it will crawl over PCIe. Check for spill before blaming a model for being slow.
 nominal one.** Nominal 24.0 would let the config validator accept a 21 GB rung that
 can never load. Use 22.5 for `.226` and 10.75 for `.210`.
 
+**Link speed is a per-host fact too, and the critical path is fine.** `.226` and
+`.87` both negotiate 1 Gbps — that is the link carrying every chat request and
+every registry pull. `.210` came back at **94.8 Mbit/s**, because its physical NIC
+negotiated 100 Mbps despite being 1 Gbps-capable and set to auto. Cable or switch
+port, not configuration.
+
+Accepted as DEGRADED rather than chased. `.210`'s work is kilobyte-scale API calls
+— an embedding request returns a ~4 KB vector, chat streams tokens — and 100 Mbit
+carries thousands per second. The only real cost is a first Docker pull from the
+registry taking ~10 minutes instead of one. Worth a cable swap, not worth a day.
+
+**ICMP is filtered fleet-wide.** Every host drops ping while answering TCP
+perfectly. Any reachability check that treats a failed ping as failure will report
+healthy hosts as dead — spike 4's original version did exactly that.
+
 **Driver version is a per-host fact, not a fleet assumption.** `.87` was on
 560.94 (CUDA 12.6) while `.226` and `.210` were on 580+ (CUDA 13.x). The cu130
 PyTorch build segfaulted on import there — `exit=139`, no message, because a
@@ -285,7 +300,7 @@ before building, made concretely.
 | 2 | `.226` CUDA soak | 2 h clean | pass | | |
 | 3 | `.149` Blackwell *(optional)* | `sm_120` present | pass | | |
 | 4 | Cross-subnet link `.149` | Mbit/s, latency | >= 500, < 5 ms | | |
-| 4b | Cross-subnet link `.210` | Mbit/s, latency | >= 500, < 5 ms | | |
+| 4b | Cross-subnet link `.210` | Mbit/s, latency | >= 500, < 5 ms | **94.8 Mbit/s** (100 Mbps physical link) | **DEGRADED — accepted** |
 | 5 | Workload peak VRAM | GB | bounded + known | | |
 | 5b | Workload frequency | blocks/day | occasional | | |
 | 6 | Demotion latency | seconds | <= 10 | | |
