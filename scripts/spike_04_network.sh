@@ -25,11 +25,25 @@ mkdir -p "$(dirname "$OUT")"
   echo
 
   echo "--- reachability ---"
+  # ICMP is blocked on some of these hosts, so a failed ping is NOT a failed
+  # spike. TCP is the authority; ping is only here for the latency number.
   if ping -c 10 -W 2 "$TARGET"; then
     echo "PING: ok"
   else
-    echo "PING: FAILED -- target unreachable. This is a FAIL; see spike 4 fallbacks."
+    echo "PING: no reply -- ICMP is likely filtered. Not a failure on its own;"
+    echo "      judge reachability by the TCP probe below."
   fi
+  echo
+  echo "--- TCP reachability (authoritative) ---"
+  TCP_OK=0
+  for p in 3389 445 22; do
+    if timeout 3 bash -c "cat < /dev/null > /dev/tcp/$TARGET/$p" 2>/dev/null; then
+      echo "  $p open -- host is reachable"
+      TCP_OK=1
+      break
+    fi
+  done
+  [[ $TCP_OK -eq 1 ]] || echo "  no common port answered -- possible genuine FAIL, check firewalls"
   echo
 
   echo "--- route ---"
