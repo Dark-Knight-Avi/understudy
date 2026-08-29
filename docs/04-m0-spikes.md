@@ -238,12 +238,33 @@ shipping something nobody wants to wait for.
 
 ---
 
+## Findings so far
+
+**The WSL2 overhead scare does not apply to Ada.** Two hosts measured 1.24–1.49 GiB
+of driver plus CUDA context, not the ~16 GiB reported for Blackwell `sm_120`. The
+ladder holds as designed on both.
+
+**CUDA on these hosts spills to system RAM rather than raising OOM**
+(`system_memory_fallback: true` on both). An oversized model will not fail fast —
+it will crawl over PCIe. Check for spill before blaming a model for being slow.
+
+**`total_vram_gb` in the fleet config should be the *measured* figure, not the
+nominal one.** Nominal 24.0 would let the config validator accept a 21 GB rung that
+can never load. Use 22.5 for `.226` and 10.75 for `.210`.
+
+**It also caught a live bug.** The `ready` check demanded free VRAM within 1 GB of
+nominal total — unreachable once 1.49 GiB is permanently held — so the toggle could
+never have reported ready. Fixed in commit 661ec1b. This is the case for measuring
+before building, made concretely.
+
+---
+
 ## Results table — fill this in
 
 | # | Spike | Metric | Target | Measured | Verdict |
 |---|---|---|---|---|---|
-| 1 | `.226` usable VRAM | GiB allocatable | >= 21 | | |
-| 1b | `.210` usable VRAM | GiB allocatable, during a normal working day | measured | | |
+| 1 | `.226` usable VRAM | GiB allocatable | >= 21 | **22.50** (of 23.99; 1.49 overhead) | **PASS** |
+| 1b | `.210` usable VRAM | GiB allocatable, during a normal working day | measured | **10.75** (of 11.99; 1.24 overhead) | **PASS** — but taken while the card was idle; re-read under real use |
 | 2 | `.226` CUDA soak | 2 h clean | pass | | |
 | 3 | `.149` Blackwell *(optional)* | `sm_120` present | pass | | |
 | 4 | Cross-subnet link `.149` | Mbit/s, latency | >= 500, < 5 ms | | |
