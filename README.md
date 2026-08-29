@@ -371,7 +371,10 @@ Stated so nobody adds them later:
 
 ## Licence
 
-Every component is open source and commercially usable. Two traps we hit and avoided, documented in
+**Apache-2.0** — see [LICENSE](LICENSE). Chosen over MIT for its explicit patent grant, which
+matters if another organisation adopts this.
+
+Every dependency is open source and commercially usable. Two traps we hit and avoided, documented in
 [`docs/tech-stack.md`](docs/tech-stack.md) §8:
 
 - **FLUX.1-dev is non-commercial** → we use FLUX.1-schnell (Apache-2.0)
