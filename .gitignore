@@ -25,3 +25,8 @@ __pycache__/
 venv/
 node_modules/
 *.log
+
+# Real deployment config -- carries actual host addresses.
+# deploy/fleet.yaml is the committed template with placeholder IPs.
+deploy/fleet.local.yaml
+deploy/host-*/.env

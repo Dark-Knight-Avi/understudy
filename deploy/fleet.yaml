@@ -1,3 +1,15 @@
+# TEMPLATE -- the addresses below are placeholders (10.0.x.x).
+#
+# On a real host, copy this to fleet.local.yaml, put your actual addresses in,
+# and point the controller at it:
+#
+#     cp deploy/fleet.yaml deploy/fleet.local.yaml
+#     $EDITOR deploy/fleet.local.yaml        # set the real `address:` values
+#     export FLEET_CONFIG=$PWD/deploy/fleet.local.yaml
+#
+# fleet.local.yaml is gitignored, so real network detail never reaches the repo
+# while this file stays committed for the tests to validate against.
+#
 # =============================================================================
 #  fleet.yaml -- the fleet controller's config
 #  Mounted read-only at /config/fleet.yaml by deploy/host-87/compose.yaml
