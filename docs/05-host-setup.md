@@ -9,6 +9,138 @@
 
 ---
 
+## 0. Verified checklist — run this, read the rest for the reasoning
+
+Everything below was corrected against real hardware during M0. The narrative that
+follows explains *why*; this is the operational form. Where they differ, this wins.
+
+**Six things M0 changed.** Each cost time to find and would cost more to rediscover:
+
+| Assumption | Reality |
+|---|---|
+| One firewall | **Two** — Windows Firewall *and* the Hyper-V layer |
+| `/24` subnets | **`/23`** — a `/24` rule silently covers half |
+| Interface is `eth0` | `.226` uses **`eth1`** |
+| Drivers are consistent | **Per-host.** Needs **>= 580** for CUDA 13 |
+| Repo location is cosmetic | `/mnt/c` is **9p, ~10-20x slower** than ext4 |
+| Ping tests reachability | **ICMP is filtered fleet-wide.** TCP only |
+
+### Step 1 — driver, FIRST (PowerShell)
+
+```powershell
+nvidia-smi        # CUDA Version must be 13.x
+```
+
+If it reports 12.x, install a **580+** driver and reboot before going further. A
+CUDA 13 PyTorch build segfaults on import against an older driver — `exit=139`, no
+message — while `nvidia-smi` keeps working throughout, because it talks to the
+driver rather than the runtime. It looks like a broken venv for as long as you let it.
+
+### Step 2 — `.wslconfig` (PowerShell)
+
+At `$env:USERPROFILE\.wslconfig`. Caps differ per host; the rest is identical.
+
+```ini
+[wsl2]
+processors=8          # .226: 8 of 32, the simulation runs keep the rest
+memory=48GB           # .87 and .210: processors=12, memory=64GB, swap=16GB
+swap=0
+networkingMode=mirrored
+autoMemoryReclaim=gradual
+dnsTunneling=true
+firewall=true
+
+[experimental]
+hostAddressLoopback=true     # or host-to-WSL loopback tests fail misleadingly
+```
+
+Then `wsl --shutdown`.
+
+### Step 3 — systemd (Ubuntu)
+
+```bash
+sudo tee /etc/wsl.conf >/dev/null <<'EOF'
+[boot]
+systemd=true
+EOF
+```
+Then `wsl --shutdown` from PowerShell again.
+
+### Step 4 — CUDA toolkit ONLY (Ubuntu)
+
+```bash
+wget https://developer.download.nvidia.com/compute/cuda/repos/wsl-ubuntu/x86_64/cuda-keyring_1.1-1_all.deb
+sudo dpkg -i cuda-keyring_1.1-1_all.deb && sudo apt update
+sudo apt install -y cuda-toolkit-13-1 iperf3
+nvidia-smi        # the card, with its real VRAM
+```
+
+Never `cuda` or `cuda-drivers` — those install a Linux driver and break the
+passthrough that makes the GPU visible at all.
+
+### Step 5 — repo and data on ext4, not `/mnt/c` (Ubuntu)
+
+```bash
+cp -r /mnt/c/Users/<you>/Desktop/understudy ~/understudy && cd ~/understudy
+echo 'export UV_LINK_MODE=copy' >> ~/.bashrc
+```
+
+`/mnt/c` is a 9p mount: fine for spikes, ruinous for Postgres, Docker volumes and
+model weights. On the model host, move the whole distro to the large NVMe first
+with `wsl --manage Ubuntu --move E:\WSL\Ubuntu`.
+
+### Step 6 — find the real subnet (Ubuntu)
+
+```bash
+ip -4 addr | grep -E "inet |^[0-9]"     # NOT `show eth0`: one host uses eth1
+```
+
+Read the network off the **broadcast**: `10.0.0.87/23 brd 10.0.1.255` means
+`10.0.0.0/23`. Ours are `/23`; a `/24` rule covers half the address space and looks
+entirely correct doing it.
+
+### Step 7 — BOTH firewall layers (PowerShell, admin)
+
+```powershell
+$wsl   = '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}'   # verify: Get-NetFirewallHyperVVMCreator
+$nets  = '10.0.0.0/23','10.0.2.0/23'                # YOUR prefixes from step 6
+$ports = 8000,8001,8081,8188,8099                   # per host, see ports.md
+
+New-NetFirewallRule -DisplayName 'Understudy' -Direction Inbound -Action Allow `
+  -Protocol TCP -LocalPort $ports -RemoteAddress $nets
+
+New-NetFirewallHyperVRule -Name 'Understudy' -DisplayName 'Understudy' `
+  -Direction Inbound -VMCreatorId $wsl -Protocol TCP `
+  -LocalPorts ($ports -join ',') -Action Allow
+```
+
+**Layer 1 alone is not enough.** Confirmed on a real host: a service inside WSL2 was
+unreachable from its own machine with correct-looking Windows rules in place. Skip
+layer 2 and you get hosts whose rules look right, whose services are running, and
+which cannot reach each other — with nothing in any log pointing at the firewall.
+
+### Step 8 — boot task (PowerShell, admin)
+
+```powershell
+$a = New-ScheduledTaskAction -Execute "wsl.exe" -Argument "-d Ubuntu -u root /bin/true"
+Register-ScheduledTask -TaskName "Understudy-WSL" -Action $a `
+  -Trigger (New-ScheduledTaskTrigger -AtStartup) -User "SYSTEM" -RunLevel Highest
+```
+
+WSL2 does not start on boot, and `restart: unless-stopped` cannot help if the VM is
+not running.
+
+### Step 9 — verify from ANOTHER machine
+
+```bash
+nc -vz <host> <port>          # TCP. Ping proves nothing here -- ICMP is filtered
+```
+
+Reboot the host first, and do not open a terminal on it: doing so starts WSL2
+yourself, and the boot task passes for the wrong reason.
+
+---
+
 ## Concept
 
 ### 1. What "host setup" means here
