@@ -18,17 +18,17 @@ help:  ## show this help
 
 .PHONY: setup
 setup:  ## dev machine: services + tooling, no CUDA torch
-	uv sync --group dev
+	uv sync --all-packages --group dev
 
 .PHONY: setup-spikes
 setup-spikes:  ## hosts only: adds PyTorch w/ CUDA (~2.5 GB) for the M0 spikes
-	uv sync --group spikes
+	uv sync --all-packages --group spikes
 
 .PHONY: lint
 lint:  ## ruff + mypy
 	uv run ruff check .
 	uv run ruff format --check .
-	uv run mypy services
+	uv run mypy services/
 
 .PHONY: fix
 fix:  ## autofix what ruff can
