@@ -56,7 +56,7 @@
   <h1>GPU fleet</h1>
   <p class="sub">
     Flip the switch before you start GPU work. Wait for <b>ready</b> — that means the
-    VRAM is actually free, not that we asked for it.
+    platform has actually let go, not that we asked it to.
   </p>
   <div id="hosts"></div>
   <footer>
@@ -72,8 +72,10 @@ const pending = new Set();   // hosts we are waiting on, so the label can say "r
 function card(h) {
   const pct = h.total_gb ? Math.round(((h.total_gb - h.free_gb) / h.total_gb) * 100) : 0;
   const held = Boolean(h.reserved_by);
-  // "ready" is measured, never assumed: the card must actually be near-empty.
-  const ready = held && h.free_gb >= h.total_gb - 1.0;
+  // "ready" means the PLATFORM has let go -- not that the card is empty.
+  // Driver + CUDA context hold ~1.5 GB permanently (M0 spike 1), so an
+  // emptiness test never succeeds and the toggle sticks on 'releasing'.
+  const ready = held && h.state === 'yielding' && !h.current_rung;
   const waiting = pending.has(h.host);
 
   let status = '';
@@ -109,7 +111,7 @@ async function refresh() {
     const { hosts } = await r.json();
     $hosts.innerHTML = hosts.map(card).join('');
     for (const h of hosts) {
-      if (pending.has(h.host) && h.free_gb >= h.total_gb - 1.0) pending.delete(h.host);
+      if (pending.has(h.host) && h.state === 'yielding' && !h.current_rung) pending.delete(h.host);
     }
   } catch {
     // A dashboard that cannot reach the controller must not imply the fleet is idle.

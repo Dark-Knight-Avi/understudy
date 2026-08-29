@@ -66,6 +66,22 @@ class FleetStatus(BaseModel):
     at: datetime
 
 
+def _is_ready(s: HostStatus) -> bool:
+    """Has the platform actually let go of this host?
+
+    NOT "is the card empty". M0 spike 1 measured 1.49 GiB of driver and CUDA
+    context overhead on the 4090, so free VRAM tops out around 22.45 of a nominal
+    23.99 GiB. An emptiness test would have demanded 22.99 and never once
+    succeeded -- the toggle would have sat on "releasing..." forever, and we would
+    have found out at M2 while blaming the model server.
+
+    What the person at the machine actually needs to know is narrower and always
+    achievable: we are out of the way. Anyone else's VRAM is not our business to
+    report on.
+    """
+    return s.state is HostState.YIELDING and s.current_rung is None
+
+
 def create_app(
     config: FleetConfig | None = None,
     *,
@@ -134,8 +150,7 @@ def create_app(
         return ReserveResponse(
             host=host,
             accepted=True,
-            # Only a measurement can say ready. Anything else is a promise.
-            ready=s.free_gb >= s.total_gb - 1.0,
+            ready=_is_ready(s),
             state=s.state,
             free_gb=s.free_gb,
             detail=decision.detail,

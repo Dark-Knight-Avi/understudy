@@ -61,12 +61,14 @@ printf 'gpu-run: waiting for VRAM' >&2
 deadline=$(( SECONDS + WAIT_S ))
 ready=0
 while (( SECONDS < deadline )); do
-  # `ready` is a measurement, not an acknowledgement: free VRAM within 1 GB of total.
+  # Ready means the PLATFORM has let go, not that the card is empty. Driver and
+  # CUDA context hold ~1.5 GB permanently (M0 spike 1), so an emptiness test can
+  # never pass and this loop would always time out.
   if api "$FLEET_URL/fleet/hosts/$HOST" 2>/dev/null | python3 -c '
 import json,sys
 try: h = json.load(sys.stdin)
 except Exception: sys.exit(1)
-sys.exit(0 if h.get("free_gb",0) >= h.get("total_gb",1e9) - 1.0 else 1)
+sys.exit(0 if h.get("state") == "yielding" and not h.get("current_rung") else 1)
 ' 2>/dev/null; then ready=1; break; fi
   printf '.' >&2
   sleep 2
