@@ -162,7 +162,7 @@ actionable, which matters when a model is generating the source.
 | MCP tool server | **Python + FastMCP** | Reference MCP SDK is Python |
 | Fleet controller | **Python + FastAPI** | Shares the ecosystem; `nvidia-smi` parsing and async polling are trivial here |
 
-**Python over TypeScript**, despite your other project being TS. The entire document-parsing,
+**Python over TypeScript** ([ADR-0006](./adr/0006-python-for-our-services.md)), despite your other project being TS. The entire document-parsing,
 embedding, reranking and MCP ecosystem lives in Python; doing this in TS means either reimplementing
 or shelling out to Python anyway. Runtime speed is irrelevant — every one of these services spends
 its time waiting on a model.

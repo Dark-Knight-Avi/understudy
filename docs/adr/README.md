@@ -19,3 +19,4 @@ argue against.
 | [0003](./0003-model-tiers-and-ladder.md) | Accepted | Two quality tiers, and an elastic model ladder driven by measured free VRAM |
 | [0004](./0004-egress-policy.md) | Accepted | Search queries may leave the network; documents and code never do |
 | [0005](./0005-rag-as-a-model-endpoint.md) | Accepted | Expose the RAG service as an OpenAI-compatible model, not as a chat-UI plugin |
+| [0006](./0006-python-for-our-services.md) | Accepted | Python + FastAPI for the RAG service, MCP tool server and fleet controller |
