@@ -1,0 +1,141 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Understudy — GPU fleet</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #12141a; --card: #1a1d26; --line: #2a2f3d;
+    --text: #e6e9ef; --dim: #8b93a7;
+    --ok: #4ade80; --warn: #fbbf24; --busy: #60a5fa; --off: #6b7280;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f7f9; --card:#fff; --line:#e2e5ea; --text:#1a1d26; --dim:#6b7280; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2rem 1rem; background: var(--bg); color: var(--text);
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 1.35rem; margin: 0 0 .25rem; }
+  .sub { color: var(--dim); margin: 0 0 1.75rem; font-size: .9rem; }
+  .host {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 1rem 1.15rem; margin-bottom: .85rem;
+  }
+  .row { display: flex; align-items: center; gap: .75rem; }
+  .name { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .state {
+    font-size: .72rem; text-transform: uppercase; letter-spacing: .05em;
+    padding: .15rem .5rem; border-radius: 999px; border: 1px solid currentColor;
+  }
+  .free    { color: var(--ok); }
+  .sharing { color: var(--busy); }
+  .yielding{ color: var(--warn); }
+  .unknown { color: var(--off); }
+  .spacer { flex: 1; }
+  .meter { height: 7px; background: var(--line); border-radius: 4px; overflow: hidden; margin: .8rem 0 .5rem; }
+  .fill { height: 100%; background: var(--busy); transition: width .4s ease; }
+  .meta { display: flex; gap: 1.25rem; font-size: .82rem; color: var(--dim); flex-wrap: wrap; }
+  .meta b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .toggle { display: flex; align-items: center; gap: .6rem; margin-top: .9rem; }
+  button {
+    font: inherit; font-size: .85rem; padding: .4rem .9rem; border-radius: 7px;
+    border: 1px solid var(--line); background: transparent; color: var(--text); cursor: pointer;
+  }
+  button:hover { border-color: var(--dim); }
+  button[data-held="true"] { background: var(--warn); border-color: var(--warn); color: #12141a; font-weight: 600; }
+  button:disabled { opacity: .5; cursor: wait; }
+  .status { font-size: .82rem; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .status.ready { color: var(--ok); font-weight: 600; }
+  footer { color: var(--dim); font-size: .78rem; margin-top: 2rem; line-height: 1.6; }
+  code { background: var(--line); padding: .1rem .35rem; border-radius: 4px; font-size: .9em; }
+</style>
+
+<main>
+  <h1>GPU fleet</h1>
+  <p class="sub">
+    Flip the switch before you start GPU work. Wait for <b>ready</b> — that means the
+    VRAM is actually free, not that we asked for it.
+  </p>
+  <div id="hosts"></div>
+  <footer>
+    Scripted jobs: <code>gpu-run python train.py</code> does the same thing without the browser.<br>
+    A switch left on with no GPU process releases itself after ~30 minutes.
+  </footer>
+</main>
+
+<script>
+const $hosts = document.getElementById('hosts');
+const pending = new Set();   // hosts we are waiting on, so the label can say "releasing…"
+
+function card(h) {
+  const pct = h.total_gb ? Math.round(((h.total_gb - h.free_gb) / h.total_gb) * 100) : 0;
+  const held = Boolean(h.reserved_by);
+  // "ready" is measured, never assumed: the card must actually be near-empty.
+  const ready = held && h.free_gb >= h.total_gb - 1.0;
+  const waiting = pending.has(h.host);
+
+  let status = '';
+  if (waiting && !ready) status = 'releasing…';
+  else if (ready) status = 'READY — the card is yours';
+  else if (held) status = `held by ${h.reserved_by}`;
+
+  return `
+    <div class="host">
+      <div class="row">
+        <span class="name">${h.host}</span>
+        <span class="state ${h.state}">${h.state}</span>
+        <span class="spacer"></span>
+        <span class="status ${ready ? 'ready' : ''}">${status}</span>
+      </div>
+      <div class="meter"><div class="fill" style="width:${pct}%"></div></div>
+      <div class="meta">
+        <span><b>${h.free_gb.toFixed(1)}</b> / ${h.total_gb.toFixed(1)} GB free</span>
+        <span>model: <b>${h.current_rung ?? 'none'}</b></span>
+        ${h.message ? `<span>${h.message}</span>` : ''}
+      </div>
+      <div class="toggle">
+        <button data-host="${h.host}" data-held="${held}" ${waiting ? 'disabled' : ''}>
+          ${held ? 'Release' : "I'm using this GPU"}
+        </button>
+      </div>
+    </div>`;
+}
+
+async function refresh() {
+  try {
+    const r = await fetch('/fleet/status');
+    const { hosts } = await r.json();
+    $hosts.innerHTML = hosts.map(card).join('');
+    for (const h of hosts) {
+      if (pending.has(h.host) && h.free_gb >= h.total_gb - 1.0) pending.delete(h.host);
+    }
+  } catch {
+    // A dashboard that cannot reach the controller must not imply the fleet is idle.
+    $hosts.innerHTML = '<div class="host"><span class="state unknown">controller unreachable</span></div>';
+  }
+}
+
+$hosts.addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-host]');
+  if (!btn) return;
+  const host = btn.dataset.host;
+  const held = btn.dataset.held === 'true';
+  btn.disabled = true;
+  if (!held) pending.add(host);
+  await fetch(`/fleet/hosts/${host}/${held ? 'release' : 'reserve'}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: held ? null : JSON.stringify({ holder: 'dashboard' }),
+  }).catch(() => {});
+  refresh();
+});
+
+// Events push state changes; the poll is a safety net for a dropped stream.
+try {
+  new EventSource('/fleet/events').onmessage = refresh;
+} catch { /* fall back to polling alone */ }
+setInterval(refresh, 3000);
+refresh();
+</script>

@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# gpu-run -- claim this host's GPU, run your command, release it.
+#
+# The scripted equivalent of the dashboard toggle, for batch and scheduled work
+# where nobody is sitting there to flip a switch.
+#
+#   gpu-run python train.py
+#   gpu-run --host 226 -- python train.py
+#
+# Why bother instead of just launching the job? Because the platform may be
+# holding a 17 GB model on that card. Auto-preemption will notice you and demote
+# within seconds, but it cannot prevent an OOM that already happened -- your job
+# allocates before the controller has reacted. This waits for the VRAM to be
+# genuinely free first, which is the difference between "works" and "works most
+# of the time".
+#
+# The release runs on EXIT, so it happens on success, failure, and Ctrl-C alike.
+
+set -uo pipefail
+
+FLEET_URL="${FLEET_URL:-http://10.0.0.87:8090}"
+HOST="${FLEET_HOST:-$(hostname | grep -oE '[0-9]+$' || true)}"
+WAIT_S="${GPU_RUN_WAIT_S:-90}"
+HOLDER="${USER:-${USERNAME:-someone}}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --host) HOST="$2"; shift 2 ;;
+    --url)  FLEET_URL="$2"; shift 2 ;;
+    --wait) WAIT_S="$2"; shift 2 ;;
+    --)     shift; break ;;
+    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \?//'; exit 0 ;;
+    *)      break ;;
+  esac
+done
+
+[[ $# -gt 0 ]] || { echo "gpu-run: nothing to run. Try: gpu-run python train.py" >&2; exit 2; }
+[[ -n "$HOST" ]] || { echo "gpu-run: cannot infer host; pass --host <name>" >&2; exit 2; }
+
+api() { curl -fsS --max-time 5 "$@"; }
+
+release() {
+  api -X POST "$FLEET_URL/fleet/hosts/$HOST/release" >/dev/null 2>&1 \
+    || echo "gpu-run: WARNING release failed; the toggle self-releases after ~30 min" >&2
+}
+
+echo "gpu-run: claiming $HOST ..." >&2
+if ! api -X POST -H 'content-type: application/json' \
+        -d "{\"holder\":\"$HOLDER\"}" \
+        "$FLEET_URL/fleet/hosts/$HOST/reserve" >/dev/null; then
+  # Fail open, loudly. A controller that is down must not stop people working --
+  # it is a courtesy layer, not a gate.
+  echo "gpu-run: WARNING controller unreachable at $FLEET_URL." >&2
+  echo "gpu-run: running anyway; the platform may still be holding VRAM." >&2
+  exec "$@"
+fi
+
+trap release EXIT INT TERM
+
+printf 'gpu-run: waiting for VRAM' >&2
+deadline=$(( SECONDS + WAIT_S ))
+ready=0
+while (( SECONDS < deadline )); do
+  # `ready` is a measurement, not an acknowledgement: free VRAM within 1 GB of total.
+  if api "$FLEET_URL/fleet/hosts/$HOST" 2>/dev/null | python3 -c '
+import json,sys
+try: h = json.load(sys.stdin)
+except Exception: sys.exit(1)
+sys.exit(0 if h.get("free_gb",0) >= h.get("total_gb",1e9) - 1.0 else 1)
+' 2>/dev/null; then ready=1; break; fi
+  printf '.' >&2
+  sleep 2
+done
+echo >&2
+
+if (( ready )); then
+  echo "gpu-run: ready. $HOST is yours." >&2
+else
+  echo "gpu-run: WARNING VRAM not free after ${WAIT_S}s -- running anyway." >&2
+  echo "gpu-run: if your job OOMs, check the dashboard at $FLEET_URL" >&2
+fi
+
+"$@"
