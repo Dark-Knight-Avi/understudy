@@ -7,6 +7,9 @@
 > [`05-host-setup.md`](./05-host-setup.md) §0 complete on `.87` and `.226`.
 >
 > **Time:** roughly a day, most of it waiting on a model download.
+>
+> **Addresses below are the repo's placeholders.** Substitute your own from
+> `deploy/fleet.local.yaml` -- `10.0.0.87` is the hub, `10.0.0.226` the model host.
 
 ---
 
@@ -100,7 +103,7 @@ docker compose --env-file .env up -d registry
 curl -sf http://localhost:5000/v2/_catalog && echo " registry OK"
 ```
 
-Needs `{"insecure-registries": ["10.72.32.87:5000"]}` in `/etc/docker/daemon.json`
+Needs `{"insecure-registries": ["10.0.0.87:5000"]}` in `/etc/docker/daemon.json`
 on **all three hosts**, then `sudo systemctl restart docker`. Unauthenticated and
 unencrypted, which is tolerable only because it is firewalled to the internal
 subnets — see [`05`](./05-host-setup.md) §7.
@@ -121,7 +124,7 @@ docker compose logs -f vllm-fast            # first load takes minutes
 **Verify — from `.226` first, then from `.87`:**
 ```bash
 curl -s http://localhost:8000/v1/models | head
-curl -s http://10.72.32.226:8000/v1/models | head     # run this one ON .87
+curl -s http://10.0.0.226:8000/v1/models | head     # run this one ON .87
 ```
 
 If it answers locally but not from `.87`, that is the **Hyper-V firewall layer**,
@@ -143,7 +146,7 @@ plus context — and the first honest number to replace the 9.0 GB estimate in
 
 ```bash
 cd ~/understudy/deploy/host-87
-$EDITOR litellm/config.yaml      # point a model at http://10.72.32.226:8000
+$EDITOR litellm/config.yaml      # point a model at http://10.0.0.226:8000
 docker compose --env-file .env up -d litellm
 ```
 
@@ -175,7 +178,7 @@ door with TLS.
 
 **Verify from another machine on the LAN:**
 ```
-https://10.72.32.87
+https://10.0.0.87
 ```
 
 First account created becomes the admin. Create yours before telling anyone the URL.
@@ -186,7 +189,7 @@ First account created becomes the admin. Create yours before telling anyone the 
 
 Not `curl`. A colleague, their own laptop, their own browser:
 
-1. Opens `https://10.72.32.87`
+1. Opens `https://10.0.0.87`
 2. Creates an account
 3. Sends a message
 4. Gets a streamed reply
