@@ -36,8 +36,12 @@ even though it's used last.
 cd ~/understudy && git pull
 uv pip install huggingface-hub
 
-# M1 uses ONE model. The full ladder comes at M2.
-huggingface-cli download Qwen/Qwen3-14B-Instruct-AWQ \
+# `uv run` -- the CLI installs into the venv, not onto PATH.
+#
+# This is the CHAT model: the thing that generates replies. Hugging Face is a
+# model registry, not an embeddings service -- it hosts every kind of model.
+# Embeddings arrive at M5 and come from the same place.
+uv run huggingface-cli download Qwen/Qwen3-14B-Instruct-AWQ \
   --local-dir /models/qwen3-14b-int4
 ```
 
