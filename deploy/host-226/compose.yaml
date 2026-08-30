@@ -79,6 +79,19 @@ networks:
     name: aiplatform-internal
     driver: bridge
     internal: true    # No route out. HF_HUB_OFFLINE below is the belt to this
+
+  # A network with internal:true SILENTLY IGNORES `ports:`. Every service on this
+  # host has to be reachable from .87 -- the gateway calls vLLM, the controller
+  # polls the agent, mcp-tools calls ComfyUI -- so they all need a non-internal
+  # network as well, and the published ports simply do not work without it.
+  #
+  # CONSEQUENCE FOR N1: a normal bridge masquerades outbound, so `internal: true`
+  # is no longer what enforces the egress boundary here. The host firewall is.
+  # docs/16's capture must therefore enumerate this network's members rather than
+  # trusting the Docker flag. HF_HUB_OFFLINE and friends remain the belt.
+  lan:
+    name: aiplatform-lan
+    driver: bridge
                       # brace: a model server that cannot reach Hugging Face
                       # cannot silently re-download 17 GB over the 1 GbE link in
                       # the middle of an incident.
@@ -223,7 +236,7 @@ services:
       - --swap-space=4                 # GiB, and it counts against the cap too
       - --disable-log-requests         # a colleague's prompts do not belong in
                                        # a container log
-    networks: [platform]
+    networks: [platform, lan]
     deploy:
       resources:
         reservations:
@@ -295,7 +308,7 @@ services:
       - --max-num-seqs=4
       - --enable-sleep-mode
       - --disable-log-requests
-    networks: [platform]
+    networks: [platform, lan]
     deploy:
       resources:
         reservations:
@@ -365,7 +378,7 @@ services:
       # the low-RAM options to letting it swap. Flag names have been renamed more
       # than once; confirm against the version you build (docs/15 section 4.1).
       - --normalvram
-    networks: [platform]
+    networks: [platform, lan]
     deploy:
       resources:
         reservations:
@@ -431,7 +444,7 @@ services:
       # modelling job it can see. Read-only and nothing else: the controller
       # explicitly has no authority to kill anybody's process (docs/08 s1).
       - /proc:/host/proc:ro
-    networks: [platform]
+    networks: [platform, lan]
     deploy:
       resources:
         reservations:
@@ -531,7 +544,7 @@ services:
                                          # start-up RAM pressure bites, drop it
                                          # and let mmap page from the NVMe --
                                          # measure both.
-    networks: [platform]
+    networks: [platform, lan]
     deploy:
       resources:
         reservations:
