@@ -98,8 +98,15 @@ you were trying to run rather than as a Docker error:
 curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey   | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
 curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list   | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g'   | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
 sudo apt update && sudo apt install -y nvidia-container-toolkit
+
+# ORDER MATTERS. Write daemon.json FIRST, then let nvidia-ctk merge into it --
+# `tee`ing the file afterwards silently wipes the runtime registration, and the
+# only symptom is `could not select device driver "" with capabilities: [[gpu]]`,
+# which names neither daemon.json nor the toolkit.
+echo '{"insecure-registries": ["10.0.0.87:5000"]}' | sudo tee /etc/docker/daemon.json
 sudo nvidia-ctk runtime configure --runtime=docker
 sudo systemctl restart docker
+cat /etc/docker/daemon.json     # must show BOTH insecure-registries and runtimes.nvidia
 
 # The check that matters: the card, seen from INSIDE a container.
 docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu24.04 nvidia-smi
