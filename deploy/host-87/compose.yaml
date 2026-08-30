@@ -296,7 +296,7 @@ services:
   #  LITELLM -- the gateway (docs/06)
   # ===========================================================================
   litellm:
-    image: ghcr.io/berriai/litellm:main-v1.72.6   # PIN. LiteLLM's config schema
+    image: ghcr.io/berriai/litellm:${LITELLM_TAG}   # PIN. LiteLLM's config schema
     restart: unless-stopped                       # moves between releases; read
     <<: *logging                                  # the changelog before bumping,
                                                   # especially for catalog and
