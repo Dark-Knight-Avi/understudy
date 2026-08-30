@@ -60,20 +60,14 @@ litellm_settings:
 router_settings:
   routing_strategy: simple-shuffle
 
-  # THIS IS WHAT MAKES YIELDING INVISIBLE. When someone claims .226, the
-  # controller deletes `chat` from the catalog and parks the model. Without a
-  # fallback the next request 404s, and the user experiences the platform's good
-  # manners as an outage.
+  # NO `fallbacks` here, and the reason is worth keeping. A fallback acts within
+  # a model group that still EXISTS. When .226 is claimed the controller deletes
+  # its deployment, and if that was the group's only member the group itself is
+  # gone -- LiteLLM answers "model not found" before any fallback runs. Measured:
+  # `Available Model Group Fallbacks=None`, HTTP 400.
   #
-  # `chat-small` is a genuinely smaller model on a DIFFERENT host (.87), not a
-  # lower rung on the contended one. Swapping models on .226 would need the agent
-  # to restart vLLM with different weights -- verbs it does not implement -- and
-  # would hand a service the power to restart processes on somebody's
-  # workstation, which docs/08 section 6.4 is deliberately careful about. Falling
-  # back to idle hardware needs neither.
-  #
-  # The honest consequence: while .226 is claimed, answers come from a 4B model
-  # and are noticeably weaker. Better than nothing, worse than the 14B, and the
-  # dashboard shows which rung is live so the drop is visible rather than
-  # mysterious.
-  fallbacks: [{"chat": ["chat-small"]}]
+  # Continuity comes from the catalog's shape instead. Both hosts advertise the
+  # same public name, so `chat` is one group with two deployments; deleting the
+  # claimed host's leaves the group intact and serving from the other. `order` in
+  # each deployment keeps the large model preferred, so the standby answers only
+  # when the preferred one is not there -- see Rung.public_name and Rung.order.

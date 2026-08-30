@@ -583,6 +583,12 @@ services:
       # takes the space back out of the KV cache. Measured here: activation 1.21
       # GiB and 1.45x concurrency without it.
       - --enable-chunked-prefill
+      # As on .226: without it Qwen3 emits its <think> scratchpad into `content`
+      # and the chat UI shows the model deliberating as though it were the reply.
+      # Doubly important here -- this host answers while .226 is claimed, so its
+      # output is what people see exactly when they are already being asked to
+      # accept a smaller model.
+      - --reasoning-parser=qwen3
       - --max-num-seqs=4
       - --enable-sleep-mode
       - --disable-log-requests        # prompts do not belong in container logs

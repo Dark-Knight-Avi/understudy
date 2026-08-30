@@ -328,6 +328,9 @@ class RoutingTarget(BaseModel):
     mode: str = "chat"
     """`chat` or `embedding`. Wrong here means health checks probe the wrong
     surface, and a perfectly healthy model reads as permanently unhealthy."""
+    order: int = 1
+    """Preference within the model group, lower first -- so the standby host only
+    answers when the preferred one has been pulled out of the catalog."""
 
 
 # --------------------------------------------------------------------------- protocol
@@ -1064,6 +1067,7 @@ def _model_new_payload(target: RoutingTarget) -> dict[str, Any]:
             "model": f"openai/{target.served_model}",
             "api_base": target.api_base,
             "api_key": target.api_key,
+            "order": target.order,
         },
         "model_info": {"id": target.deployment_id, "mode": target.mode},
     }

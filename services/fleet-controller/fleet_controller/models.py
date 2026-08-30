@@ -70,6 +70,29 @@ class Rung(BaseModel):
             "ingestion and every RAG query."
         ),
     )
+    public_name: str | None = Field(
+        default=None,
+        description=(
+            "The catalog name users ask for, when it differs from `name`. Two "
+            "rungs on DIFFERENT hosts sharing a public name become two "
+            "deployments of one model group, which is what keeps chat answering "
+            "while a host is claimed: the controller deletes the claimed host's "
+            "deployment and the group survives with the other. "
+            "LiteLLM's `fallbacks` cannot do this -- they act within a group that "
+            "still exists, and a group whose only deployment was deleted returns "
+            "'model not found' before any fallback runs."
+        ),
+    )
+    order: int = Field(
+        default=1,
+        ge=1,
+        description=(
+            "Preference within the model group, lower first. Without it the "
+            "gateway would shuffle across deployments and answer some requests "
+            "from the small standby model while the large one is available, which "
+            "reads as the platform being erratic rather than as a fallback."
+        ),
+    )
 
 
 class HostConfig(BaseModel):

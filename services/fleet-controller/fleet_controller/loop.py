@@ -279,10 +279,11 @@ class FleetLoop:
         return tuple(
             RoutingTarget(
                 deployment_id=f"{r.name}-{cfg.name}",
-                public_name=r.name,
+                public_name=r.public_name or r.name,
                 served_model=r.served_model,
                 api_base=api_base,
                 api_key=key_ref,
+                order=r.order,
                 mode="embedding" if r.always_on else "chat",
             )
             for r in rungs
