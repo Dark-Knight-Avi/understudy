@@ -147,6 +147,16 @@ hosts:
   # ===========================================================================
   #  .226 -- the model host. Fast tier and (gated) deep tier.
   # ===========================================================================
+  # EVERY host in this fleet runs WSL2, where nvidia-smi cannot name a process:
+  # it returns '[Not Found]' for process_name and '[N/A]' for per-process memory.
+  # Ownership by name or pid is therefore impossible, and enumerating "foreign"
+  # processes yields only false positives -- our own parked engine's CUDA context
+  # reads as somebody's job. Set trust_process_enumeration: false and ownership
+  # is decided by subtraction: used, minus our rung, minus the context, is theirs.
+  #
+  # On a host where nvidia-smi CAN name processes, leave it true: enumeration
+  # notices a job that is holding a context but almost no memory, which
+  # subtraction cannot see.
   - name: "226"
     address: 10.0.0.226
     total_vram_gb: 24.0

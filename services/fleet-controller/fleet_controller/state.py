@@ -453,6 +453,40 @@ def release(
     )
 
 
+def _attribute_usage(sample: GpuSample, config: HostConfig, rt: HostRuntime) -> GpuSample:
+    """Decide whose VRAM this is, on a host that cannot name its own processes.
+
+    Under WSL2 `nvidia-smi` returns `[Not Found]` for every process_name and
+    `[N/A]` for per-process memory. It reports THAT a compute context exists and
+    nothing more -- so neither of `ProcessOwnership`'s mechanisms can work, and
+    enumeration produces only false positives. The platform's own parked engine
+    keeps a CUDA context; the agent lists it; the controller calls it somebody's
+    job.
+
+    That misreading is not merely wasteful, it inverts the guarantee. Observed on
+    .226: a claim was honoured, the model parked, the card went to 22.7 GB free --
+    and then the controller settled against "their job", found 22.7 GB free, and
+    loaded a 16 GB model onto a card it had just promised to somebody. A real
+    10 GB job starting a moment later would have OOM'd against a dashboard
+    reading YOURS.
+
+    So on such a host we discard enumeration and attribute by subtraction, which
+    needs no process identity at all: whatever is used beyond what WE should be
+    using is theirs. `models.GpuSample.has_foreign_process` already prefers this
+    signal when enumeration is silent -- it was simply never computed.
+    """
+    if config.trust_process_enumeration:
+        return sample
+
+    ours = config.cuda_context_gb + (rt.rung.footprint_gb if rt.rung is not None else 0.0)
+    return sample.model_copy(
+        update={
+            "foreign_pids": (),
+            "foreign_used_gb": max(0.0, sample.used_gb - ours),
+        }
+    )
+
+
 def observe(
     runtime: HostRuntime,
     config: HostConfig,
@@ -476,6 +510,8 @@ def observe(
     age = now - sample.sampled_at
     if age > timings.max_sample_age:
         return _missed(runtime, now, timings, f"reading is {age.total_seconds():.0f}s stale")
+
+    sample = _attribute_usage(sample, config, runtime)
 
     # Computed against the rung resident *now*, before anything this tick changes it.
     reading = Reading(sample=sample, available_gb=_available_gb(sample.free_gb, runtime.rung))

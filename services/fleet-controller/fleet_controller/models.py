@@ -82,6 +82,31 @@ class HostConfig(BaseModel):
     total_vram_gb: float = Field(gt=0)
     rungs: tuple[Rung, ...] = Field(description="Any order; the selector sorts them")
     vllm_url: str | None = None
+
+    trust_process_enumeration: bool = Field(
+        default=True,
+        description=(
+            "Whether nvidia-smi on this host can identify processes. FALSE under "
+            "WSL2, where it reports '[Not Found]' for every process_name and "
+            "'[N/A]' for per-process memory -- so ownership cannot be decided by "
+            "name or pid, and enumeration yields ONLY false positives: the "
+            "platform sees its own parked engine's CUDA context, calls it "
+            "somebody's job, and sizes itself around work that does not exist. "
+            "When false, ownership is decided by subtraction instead."
+        ),
+    )
+    cuda_context_gb: float = Field(
+        default=1.5,
+        ge=0,
+        description=(
+            "VRAM the driver and CUDA context hold for a live vLLM process even "
+            "when its weights are parked -- it is released only when the process "
+            "exits, never by sleep. Subtraction must allow for it or a parked "
+            "model reads as somebody else holding 1.4 GB forever. M0 spike 1 "
+            "measured 1.49 on .226 and 1.24 on .87 and .210."
+        ),
+    )
+
     detect_interactive_login: bool = Field(
         default=False,
         description=(
