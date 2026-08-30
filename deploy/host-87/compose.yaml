@@ -196,7 +196,10 @@ services:
       - caddy_config:/config         # volume means re-trusting a new root on
                                      # every client machine -- the one volume
                                      # worth copying off by hand.
-    networks: [platform]
+    # `lan` is required for the published port to work at all: a network with
+    # internal:true silently ignores `ports:`, so this service would come up
+    # healthy and be unreachable from the host. Confirmed on .87 during M1.
+    networks: [platform, lan]
     # Caddy is on the internal network ONLY, which makes `tls internal` not a
     # preference but a necessity: ACME is structurally impossible from here.
     # That is the right answer anyway -- no public DNS, no egress, one CA root
@@ -279,7 +282,10 @@ services:
       - "0.0.0.0:5000:5000"
     volumes:
       - registry_data:/var/lib/registry
-    networks: [platform]
+    # `lan` is required for the published port to work at all: a network with
+    # internal:true silently ignores `ports:`, so this service would come up
+    # healthy and be unreachable from the host. Confirmed on .87 during M1.
+    networks: [platform, lan]
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:5000/v2/"]
       interval: 30s

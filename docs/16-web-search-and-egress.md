@@ -1,5 +1,14 @@
 # 16 — Web Search & the Egress Boundary
 
+> **Corrected during M1:** a Docker network with `internal: true` **silently ignores
+> `ports:`**. A service on the internal network alone comes up healthy and is
+> unreachable from the host — `docker port` prints nothing and no listener appears.
+> Confirmed on `.87`, where nine services declared publishes that could never take
+> effect. Anything that must be reachable from the LAN needs the `lan` network as
+> well as `platform`; the internal flag still does its job, because `lan` carries no
+> route to the internet. This does not weaken N1, but it does mean the egress proof
+> must enumerate `lan` members rather than assuming `internal: true` covers everything.
+
 > **Pre-build draft.** Written ahead of the milestone; revise after it ships to describe what actually shipped.
 
 > Web search lands in **M6**; the egress proof is the headline test of **M8**. This document
