@@ -157,20 +157,37 @@ Optional and deferred. Image generation runs on `.226` under admission control i
 
 Effort assumes focused days. Part-time, multiply by two to three.
 
-| # | Milestone | Hosts | You build | I document | Acceptance | Effort |
-|---|---|---|---|---|---|---|
-| **M0** | Spikes | all 3 | Run [`04-m0-spikes.md`](./04-m0-spikes.md) | Results recorded, design adjusted | Spikes 1–4 pass or have a recorded workaround | 1–2 d |
-| **M1** | Chat online | `.87`, `.226` | Host setup, Postgres, LiteLLM, vLLM, Open WebUI, Caddy | `05-host-setup`, `06-model-gateway`, `07-inference-servers` | A colleague logs in from their own machine and chats; TTFT < 2 s | 2–3 d |
-| **M1.5** | **RAGFlow spike** | `.87` | Install RAGFlow, point at the gateway, run the eval set | ADR-0007 verdict | Refusal, per-user isolation, MCP reachability — all three pass | **1 d** |
-| **M2** | Coexistence | `.87`, `.226` | **Fleet controller** + dashboard toggle, `gpu-run` | `08-fleet-controller` | All 8 tests in [`03-gpu-sharing-policy.md`](./03-gpu-sharing-policy.md) §7 | 4–6 d |
-| **M3** | Coding | `.226` | OpenCode + Cline config; context tuning | `09-coding-agents` | A real task completed end-to-end in both clients | 2–3 d |
-| **M4** | Deep tier | `.226` | `ik_llama.cpp`, 235B weights, gating on modelling state | `07-inference-servers` §deep | Deep model in the catalog; modelling runs unaffected | 3–5 d |
-| **M5** | RAG | `.87` | Integrate RAGFlow; relevance-gate wrapper only if the spike needs it | ADR-0007, `12` if wrapping | Cited answers; recall@5 on the eval set | **2–4 d** (12 d if the spike fails) |
-| **M6** | Tools | `.87`, `.226` | **MCP server**: search, PDF, PPTX; SearXNG; ComfyUI on `.226` under admission control | `14`, `15`, `16` | One tool invoked from all three clients; an image generated without disturbing a coding session | 5–7 d |
-| **M7** | Hardening | all 3 | Backups, monitoring, egress lockdown, boot resilience | `17`, `18` | Egress proof; reboot test; eval set green | 4–6 d |
+**Status as of 2026-08-30.** M0, M1 and M2's gate are complete and running on the
+real fleet. Per-milestone detail: [`04-m0-spikes.md`](./04-m0-spikes.md),
+[`m1-runbook.md`](./m1-runbook.md), [`m2-runbook.md`](./m2-runbook.md).
+
+| # | Milestone | Status | Hosts | You build | I document | Acceptance | Effort |
+|---|---|---|---|---|---|---|---|
+| **M0** | Spikes | ✅ **done** — both gating risks closed. WSL2 VRAM overhead 1.24–1.49 GiB, not the ~16 feared; 2 h CUDA soak passed on the Threadripper. **Spike 5 (workload profile) still outstanding** | all 3 | Run [`04-m0-spikes.md`](./04-m0-spikes.md) | Results recorded, design adjusted | Spikes 1–4 pass or have a recorded workaround | 1–2 d |
+| **M1** | Chat online | ✅ **done** — Qwen3-14B on `.226` behind LiteLLM on `.87`, Open WebUI + Caddy TLS. 4.12× concurrency at 16k context | `.87`, `.226` | Host setup, Postgres, LiteLLM, vLLM, Open WebUI, Caddy | `05-host-setup`, `06-model-gateway`, `07-inference-servers` | A colleague logs in from their own machine and chats; TTFT < 2 s | 2–3 d |
+| **M1.5** | **RAGFlow spike** | ⬜ not started | `.87` | Install RAGFlow, point at the gateway, run the eval set | ADR-0007 verdict | Refusal, per-user isolation, MCP reachability — all three pass | **1 d** |
+| **M2** | Coexistence | 🟡 **gate passed, 4 of 8 tests unrun.** Claim → card free in ~12 s and held; chat uninterrupted from a 4B standby on `.87`; reclaim ~5 min after release. **The per-host ladder is not built** and only the cooperative path is proven — see [`m2-runbook.md`](./m2-runbook.md) | `.87`, `.226` | **Fleet controller** + dashboard toggle, `gpu-run` | `08-fleet-controller` | All 8 tests in [`03-gpu-sharing-policy.md`](./03-gpu-sharing-policy.md) §7 | 4–6 d |
+| **M3** | Coding | ⬜ not started | `.226` | OpenCode + Cline config; context tuning | `09-coding-agents` | A real task completed end-to-end in both clients | 2–3 d |
+| **M4** | Deep tier | ⬜ not started | `.226` | `ik_llama.cpp`, 235B weights, gating on modelling state | `07-inference-servers` §deep | Deep model in the catalog; modelling runs unaffected | 3–5 d |
+| **M5** | RAG | ⬜ not started | `.87` | Integrate RAGFlow; relevance-gate wrapper only if the spike needs it | ADR-0007, `12` if wrapping | Cited answers; recall@5 on the eval set | **2–4 d** (12 d if the spike fails) |
+| **M6** | Tools | ⬜ not started — note: `searxng`'s pinned tag does not exist upstream and must be corrected first | `.87`, `.226` | **MCP server**: search, PDF, PPTX; SearXNG; ComfyUI on `.226` under admission control | `14`, `15`, `16` | One tool invoked from all three clients; an image generated without disturbing a coding session | 5–7 d |
+| **M7** | Hardening | ⬜ not started | all 3 | Backups, monitoring, egress lockdown, boot resilience | `17`, `18` | Egress proof; reboot test; eval set green | 4–6 d |
 
 **Total: roughly 4–6 focused weeks** with RAGFlow adopted; 6–9 if the M1.5 spike fails and M5 is
 built. That single day of spiking is the highest-leverage hour in the plan.
+
+**On the estimates, now that three milestones have actually run.** M0 and M1 landed
+close to plan. M2 did not: bringing the fleet controller up on real hardware
+surfaced ten defects in a service that had 395 passing tests, and every one was
+invisible until it ran against real GPUs — the controller could not recognise its
+own model after a restart, mistook its own parked engine for a user's job and
+re-took a reserved card, could not authenticate a deployment it had registered
+itself, and discarded every log line below WARNING, which is why finding the rest
+took a day rather than an hour.
+
+None of that was avoidable by more careful design. It is what "deploy to real
+hardware" costs, and the later milestones should be read with that in mind rather
+than as though the estimates were wrong.
 
 ### Why this order
 
@@ -242,10 +259,14 @@ possible to install this on someone else's workstation.
 
 | Risk | Trigger to watch | Response |
 |---|---|---|
-| WSL2 eats VRAM on `.226` | M0 spike 1 < 20 GiB | Ladder rungs shift down; consider native Linux |
-| CUDA hangs on AMD + WSL2 | M0 spike 2 | Ollama fallback, or move serving to `.149` |
-| `.149` approval refused | M0 | Drop to two hosts; image gen time-shares `.226` |
+| ~~WSL2 eats VRAM on `.226`~~ | **Closed at M0.** Overhead is 1.49 GiB, not the ~16 feared | — |
+| ~~CUDA hangs on AMD + WSL2~~ | **Closed at M0.** 2 h soak, 1,082,616 iterations, 150.4 it/s flat | — |
+| **A colleague's job OOMs against a card the platform said was free** | Any report of an unexplained CUDA OOM on `.226` | **The live one.** Auto-preemption is untested, so tell people the toggle is *required* rather than optional until it is. M2 already produced this bug once — the platform re-took a reserved card after 60 s — and it was caught only by watching `nvidia-smi` during a claim |
+| Platform slows the modelling runs it lives alongside | Per-iteration time vs the ~48 min baseline | **Untested.** The don't-disturb check must run before anyone else uses the platform: it is the question that decides whether this stays installed |
+| `.210` approval refused | M0 | Drop to two hosts; image gen time-shares `.226` |
 | Deep tier starves modelling runs | M0 spike 7 | Off-hours only, or no deep tier |
+| Driver drift across hosts | `nvidia-smi` version per host | `.87` is on 615, `.226` still a generation back. It works; close it before M4 |
+| Secrets exposed in transcripts or chat | Any key pasted outside `.env` | One rotation pass covering the host passwords, both vLLM keys, the Postgres password and the LiteLLM master/salt keys. Outstanding since M1 |
 | Cline burns the context window | M3 | Roo Code, or Aider's diff-based flow |
 | Retrieval quality disappoints | M5 recall@5 | Chunking strategy first, then rerank depth, then model |
 | Nobody adopts it | Usage after M3 | Talk to people. Usually the reason is speed or a missing tool, both fixable |
@@ -253,6 +274,14 @@ possible to install this on someone else's workstation.
 
 The last two are the ones that actually kill projects like this. The technical risks all have
 workarounds; adoption and bus factor do not.
+
+**One risk was missing and belongs at the top now that the code has met real
+hardware: a service that is confidently wrong about the GPU.** Every M2 defect
+took that shape — the controller could not recognise its own model, mistook its
+own parked engine for a user's job, and re-took a card it had just promised away.
+None was caught by 395 passing tests, and none would have been caught by more of
+them. They were caught by watching `nvidia-smi` while using the thing. Budget for
+that on every milestone that touches the cards.
 
 ---
 
