@@ -66,9 +66,11 @@ def main() -> int:
     if target.exists() and not args.force:
         # Regenerating over a live .env would rotate every secret and orphan the
         # data encrypted under the old ones. Refuse rather than ask.
-        print(f"{target} already exists. Use --force only if you mean to rotate "
-              f"EVERY secret -- existing sessions and the Postgres role will break.",
-              file=sys.stderr)
+        print(
+            f"{target} already exists. Use --force only if you mean to rotate "
+            f"EVERY secret -- existing sessions and the Postgres role will break.",
+            file=sys.stderr,
+        )
         return 1
 
     generated: list[str] = []
