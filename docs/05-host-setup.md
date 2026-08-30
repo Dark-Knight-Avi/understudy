@@ -80,6 +80,18 @@ passthrough that makes the GPU visible at all.
 
 ### Step 5 — repo and data on ext4, not `/mnt/c` (Ubuntu)
 
+Docker itself, before anything else:
+
+```bash
+# docker.io alone does NOT provide `docker compose` -- the plugin is a separate
+# package, and without it every compose command fails with "unknown flag".
+sudo apt install -y docker.io docker-compose-v2
+sudo usermod -aG docker $USER && newgrp docker
+docker compose version        # must print v2.x
+```
+
+Then the repo:
+
 ```bash
 # --exclude=.venv is not optional. A virtualenv holds absolute paths and symlinks
 # to its interpreter; copied to a new location it is dead, and uv reports it as
