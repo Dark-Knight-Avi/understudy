@@ -621,7 +621,7 @@ services:
   #  doing as much work here as the preemption logic (docs/03 Reflect).
   # ===========================================================================
   fleet-controller:
-    image: 10.0.0.87:5000/fleet-controller:${FLEET_CONTROLLER_TAG}
+    image: ${REGISTRY}/fleet-controller:${FLEET_CONTROLLER_TAG}
     restart: unless-stopped
     <<: *logging
     environment:
@@ -635,7 +635,11 @@ services:
                                                   # edits it through the LiteLLM
                                                   # UI on a live system.
     volumes:
-      - ../fleet.yaml:/config/fleet.yaml:ro   # one file, shared by the fleet
+      # fleet.yaml in the repo is a TEMPLATE with placeholder addresses; the
+      # real one is deploy/fleet.local.yaml and is gitignored. Mounting the
+      # template would give the controller addresses that resolve nowhere,
+      # and it would report every host unreachable rather than fail loudly.
+      - ${FLEET_CONFIG_FILE:-../fleet.local.yaml}:/config/fleet.yaml:ro
       - fleet_data:/data
     ports:
       - "0.0.0.0:8090:8090"                   # docs/05 section 4. Also behind
@@ -660,7 +664,7 @@ services:
   #  MCP TOOL SERVER -- ours (docs/14)
   # ===========================================================================
   mcp-tools:
-    image: 10.0.0.87:5000/mcp-tools:${MCP_TOOLS_TAG}
+    image: ${REGISTRY}/mcp-tools:${MCP_TOOLS_TAG}
     restart: unless-stopped
     <<: *logging
     environment:

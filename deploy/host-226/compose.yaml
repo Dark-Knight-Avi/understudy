@@ -379,7 +379,7 @@ services:
   #  in .env, and pulled from the registry on .87 like everything else we build.
   # ===========================================================================
   comfyui:
-    image: 10.0.0.87:5000/comfyui:${COMFYUI_TAG}
+    image: ${REGISTRY}/comfyui:${COMFYUI_TAG}
     restart: unless-stopped
     <<: *logging
     ports:
@@ -440,7 +440,11 @@ services:
   #  references -- reconcile them and fix the firewall rule.
   # ===========================================================================
   fleet-agent:
-    image: 10.0.0.87:5000/fleet-agent:${FLEET_AGENT_TAG}
+    # Same image as the controller on .87, different entrypoint. The two
+    # speak a private wire protocol and a version skew between them is
+    # silent and dangerous -- see services/fleet-controller/Dockerfile.
+    image: ${REGISTRY}/fleet-controller:${FLEET_AGENT_TAG}
+    command: ["uvicorn", "fleet_controller.agent:app", "--host", "0.0.0.0", "--port", "8099"]
     restart: unless-stopped
     <<: *logging
     ports:
@@ -527,7 +531,7 @@ services:
   # ===========================================================================
   ik-llama:
     profiles: ["deep"]
-    image: 10.0.0.87:5000/ik-llama:${IK_LLAMA_TAG}   # built from ${IK_LLAMA_COMMIT}
+    image: ${REGISTRY}/ik-llama:${IK_LLAMA_TAG}   # built from ${IK_LLAMA_COMMIT}
     restart: unless-stopped
     <<: *logging
     ipc: host
