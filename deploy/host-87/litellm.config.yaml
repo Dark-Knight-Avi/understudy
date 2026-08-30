@@ -12,28 +12,20 @@
 # M1 defines ONE model. The ladder arrives at M2, when the fleet controller can
 # actually move between rungs.
 
-model_list:
-  # ---------------------------------------------------------------- fast tier
-  - model_name: chat
-    litellm_params:
-      # `openai/` tells LiteLLM to speak the OpenAI protocol to a non-OpenAI
-      # backend.
-      # Must match a --served-model-name on the backend. .226's vllm-fast
-      # answers to both `coder` and `fast-tier`; `fast-tier` is the honest one
-      # for M1, where the rung holds a 14B rather than the 30B coder.
-      model: openai/fast-tier
-      # Real addresses do not live in the repo (same rule as fleet.local.yaml).
-      # LiteLLM resolves `os.environ/` in any litellm_params field, not just
-      # api_key, so the host is configuration rather than a committed constant.
-      api_base: os.environ/VLLM_226_BASE
-      api_key: os.environ/VLLM_226_KEY
-    model_info:
-      # Stable id the fleet controller adds and removes deployments by.
-      id: chat-226
-
-  # --- M2 adds the rest of the ladder here: coder, chat-small, chat-tiny ---
-  # --- M4 adds deep-slow (ik_llama.cpp on :8081) ---
-  # --- M5 adds team-docs (RAGFlow) ---
+# EMPTY ON PURPOSE. The fleet controller owns this catalog (docs/06 section 7):
+# it registers a deployment when a rung goes live and deletes it when the host
+# yields, through /model/new and /model/delete against the database.
+#
+# A deployment declared HERE cannot be deleted through that API -- the attempt
+# returns `Model with id=chat-226 not found in db`, because a config-file entry
+# has no database row. The consequence is not a missing feature: the controller
+# parks the model on a yielding host and the gateway keeps routing chat to it,
+# so users see failures precisely when the platform was being polite.
+#
+# The trade is deliberate and worth stating: with the catalog in the database,
+# a controller that is down means an empty catalog. That is the cost of having
+# routing follow the fleet, and it is why the controller restarts unless-stopped.
+model_list: []
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

@@ -203,13 +203,27 @@ class FleetLoop:
         await self._route(cfg, desired)
 
     def _targets(self, cfg: HostConfig, rungs: tuple[Rung, ...]) -> tuple[RoutingTarget, ...]:
-        base = cfg.vllm_url or ""
+        # `vllm_url` is the server ROOT, because that is where the sleep and wake
+        # endpoints live (`/sleep`, `/wake_up`). LiteLLM addressing an OpenAI
+        # backend wants the API prefix, so the two uses of this one field differ
+        # by exactly `/v1`. Registering the root instead yields a deployment that
+        # 404s on every request while the gateway reports it configured.
+        base = (cfg.vllm_url or "").rstrip("/")
+        api_base = base if base.endswith("/v1") else f"{base}/v1"
+
+        # An `os.environ/NAME` reference, resolved by the GATEWAY, so the key
+        # never crosses this wire. The name has to be one LiteLLM actually holds:
+        # compose gives it VLLM_226_KEY, VLLM_87_KEY, VLLM_210_KEY -- per host,
+        # never a bare VLLM_KEY.
+        key_ref = f"os.environ/VLLM_{cfg.name}_KEY"
+
         return tuple(
             RoutingTarget(
                 deployment_id=f"{r.name}-{cfg.name}",
                 public_name=r.name,
                 served_model=r.served_model,
-                api_base=base,
+                api_base=api_base,
+                api_key=key_ref,
                 mode="embedding" if r.always_on else "chat",
             )
             for r in rungs
