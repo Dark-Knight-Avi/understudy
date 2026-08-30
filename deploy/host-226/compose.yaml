@@ -177,7 +177,20 @@ services:
                                        # fp8); a wrong value is a slow path or a
                                        # refusal to start.
       - --dtype=auto
-      - --gpu-memory-utilization=0.90  # >>> THE FLAG THAT DECIDES WHETHER THE
+      # >>> THE FLAG THAT DECIDES WHETHER THE SHARING POLICY IS SAFE <<<
+      #
+      # vLLM reserves utilization x TOTAL up front -- it does not grow into it.
+      # Measured on .226: weights 9.36 GiB, but at 0.90 the process held 21.59
+      # GiB and left 740 MiB free on the card. That is below even the FREE-state
+      # margin, let alone the 3 GB the sharing policy promises, and any CUDA job
+      # started by the person at that machine would OOM.
+      #
+      # Set this per rung, from the footprint the ladder budgets:
+      #     utilization = footprint_gb / total_vram_gb
+      # It is the same number as `footprint_gb` in fleet.yaml, expressed as a
+      # fraction. If the two disagree, the controller is planning against a
+      # footprint vLLM is not honouring.
+      - --gpu-memory-utilization=${FAST_GPU_UTIL}  # >>> THE FLAG THAT DECIDES WHETHER THE
                                        # SHARING POLICY IS SAFE. <<< It is a
                                        # fraction, but whether of TOTAL or of
                                        # FREE VRAM has varied across vLLM
