@@ -405,6 +405,35 @@ services:
       ANONYMIZED_TELEMETRY: "false"
     volumes:
       - open_webui_data:/app/backend/data
+
+      # Branding. Open WebUI's marks are PNGs baked into the image, so the only
+      # way to replace them is to mount over them -- and the SAME files exist in
+      # two trees, the built frontend and the backend's static dir. Replace one
+      # and you get our logo on the tab and theirs on the splash.
+      #
+      # icon.png is the SEAL ALONE, cropped from the lockup, because the square
+      # slots render at ~24px and a 1402x578 lockup scaled into one is an
+      # illegible strip. splash.png is the full lockup, where width is fine.
+      # Regenerate both with branding/README.md rather than editing by hand.
+      #
+      # These paths must EXIST in the image: a bind-mount onto a missing path
+      # creates a directory there and breaks the container. Verified against
+      # v0.6.15; re-check on any image bump.
+      - ./branding/icon.png:/app/build/static/favicon.png:ro
+      - ./branding/icon.png:/app/build/static/favicon-96x96.png:ro
+      - ./branding/icon.png:/app/build/static/apple-touch-icon.png:ro
+      - ./branding/icon.png:/app/build/static/web-app-manifest-192x192.png:ro
+      - ./branding/icon.png:/app/build/static/web-app-manifest-512x512.png:ro
+      - ./branding/splash.png:/app/build/static/splash.png:ro
+      - ./branding/splash.png:/app/build/static/splash-dark.png:ro
+      - ./branding/icon.png:/app/backend/open_webui/static/favicon.png:ro
+      - ./branding/icon.png:/app/backend/open_webui/static/favicon-96x96.png:ro
+      - ./branding/icon.png:/app/backend/open_webui/static/apple-touch-icon.png:ro
+      - ./branding/icon.png:/app/backend/open_webui/static/web-app-manifest-192x192.png:ro
+      - ./branding/icon.png:/app/backend/open_webui/static/web-app-manifest-512x512.png:ro
+      - ./branding/splash.png:/app/backend/open_webui/static/splash.png:ro
+      - ./branding/splash.png:/app/backend/open_webui/static/splash-dark.png:ro
+      - ./branding/icon.png:/app/backend/open_webui/static/logo.png:ro
     networks: [platform]
     # Deliberately NOT published: docs/05 section 4 puts Open WebUI behind Caddy,
     # and the host's :8080 would collide with the MCP server's published port.
