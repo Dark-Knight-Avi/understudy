@@ -86,9 +86,14 @@ Docker itself, before anything else:
 # docker.io alone does NOT provide `docker compose` -- the plugin is a separate
 # package, and without it every compose command fails with "unknown flag".
 sudo apt install -y docker.io docker-compose-v2
-sudo usermod -aG docker $USER && newgrp docker
+sudo usermod -aG docker $USER
 docker compose version        # must print v2.x
 ```
+
+Then **open a new shell** so the group membership applies. Do not use `newgrp
+docker` inside a pasted block: it *replaces* the current shell, so every command
+after it is silently discarded -- the terminal simply returns a prompt and you
+conclude the block ran.
 
 **On every GPU host, also install the NVIDIA container toolkit.** Docker cannot
 pass a GPU into a container without it, and the failure surfaces inside whatever
