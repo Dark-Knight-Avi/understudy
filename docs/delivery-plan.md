@@ -161,6 +161,12 @@ Effort assumes focused days. Part-time, multiply by two to three.
 real fleet. Per-milestone detail: [`04-m0-spikes.md`](./04-m0-spikes.md),
 [`m1-runbook.md`](./m1-runbook.md), [`m2-runbook.md`](./m2-runbook.md).
 
+> This table is the project's status of record — update it when a milestone moves,
+> not at the end. [`../AGENTS.md`](../AGENTS.md) sends everyone here for the answer
+> to "where are we", so a stale row misdirects the next person to pick this up.
+> Note that this document assumes the orientation reading in its header: it says
+> where the work stands, never what the work is.
+
 | # | Milestone | Status | Hosts | You build | I document | Acceptance | Effort |
 |---|---|---|---|---|---|---|---|
 | **M0** | Spikes | ✅ **done** — both gating risks closed. WSL2 VRAM overhead 1.24–1.49 GiB, not the ~16 feared; 2 h CUDA soak passed on the Threadripper. **Spike 5 (workload profile) still outstanding** | all 3 | Run [`04-m0-spikes.md`](./04-m0-spikes.md) | Results recorded, design adjusted | Spikes 1–4 pass or have a recorded workaround | 1–2 d |

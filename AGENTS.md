@@ -3,14 +3,34 @@
 You are picking up an in-progress project. **Nothing about its state is in this
 file** — state lives in the repo, and this file tells you where.
 
-Read these three, in order, before doing anything:
+### First — what this is
 
-1. **[`docs/delivery-plan.md`](docs/delivery-plan.md) §6** — the milestone table.
-   Status column is authoritative: what is done, what is amber and why, what has
-   not started. Start from the first row that is not ✅.
-2. **[`docs/delivery-plan.md`](docs/delivery-plan.md) §11** — the risk register.
+The delivery plan tells you where to resume; it does **not** tell you what you are
+building. It is a delivery-mechanics document and says so in its own header. Read
+the orientation first or the milestone table will not mean anything:
+
+1. **[`README.md`](README.md)** — what the system is and the problem it solves.
+2. **[`docs/00-goals-and-constraints.md`](docs/00-goals-and-constraints.md)** —
+   the numbered requirements. Later docs argue by referring to `N1`, `N4`, `N6`;
+   without this they read as arbitrary.
+3. **[`docs/02-hardware-and-fleet.md`](docs/02-hardware-and-fleet.md)** — three
+   workstations, what each is for, and why the 256 GB of system RAM matters more
+   than the 4090.
+4. **[`docs/03-gpu-sharing-policy.md`](docs/03-gpu-sharing-policy.md)** — **the
+   load-bearing document.** The whole project exists to satisfy it. If you read
+   only one, read this.
+5. **[`docs/01-architecture.md`](docs/01-architecture.md)** and
+   [`docs/adr/`](docs/adr/) — the shape, and why each major choice was made rather
+   than its alternatives.
+
+### Then — where the work stands
+
+6. **[`docs/delivery-plan.md`](docs/delivery-plan.md) §6** — the milestone table.
+   The status column is authoritative: what is done, what is amber and why, what
+   has not started. Start from the first row that is not ✅.
+7. **[`docs/delivery-plan.md`](docs/delivery-plan.md) §11** — the risk register.
    It says which failure is live right now, not which were feared at design time.
-3. **The runbook for the milestone you are resuming**, if one exists:
+8. **The runbook for the milestone you are resuming**, if one exists:
    [`docs/m1-runbook.md`](docs/m1-runbook.md),
    [`docs/m2-runbook.md`](docs/m2-runbook.md). Each records what actually shipped,
    including where the original plan turned out to be wrong.
