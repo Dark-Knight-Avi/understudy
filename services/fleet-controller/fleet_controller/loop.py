@@ -134,12 +134,45 @@ class FleetLoop:
 
     async def run(self) -> None:
         """Start one task per host. Cancels cleanly."""
+        await self._adopt_known_state()
         interval = self._config.tunables.poll_interval_s
         self._tasks = [
             asyncio.create_task(self._host_loop(h, interval), name=f"fleet-{h.name}")
             for h in self._config.hosts
         ]
         await asyncio.gather(*self._tasks)
+
+    async def _adopt_known_state(self) -> None:
+        """Park every host's model before deciding anything.
+
+        A fresh controller believes nothing is loaded, because its runtime starts
+        with `rung=None`. That belief is unrecoverable on its own: nvidia-smi
+        reports free VRAM, which already excludes our own model, and
+        `_available_gb` only adds back a rung we think we hold. So a controller
+        restarted while .226 served a 16 GB model saw 7.8 GB free, concluded that
+        nothing in the ladder fits, selected no rung, advertised nothing, and
+        sat there -- with a perfectly healthy model running that it could not
+        account for, and chat returning 400.
+
+        Nothing moves it out of that state either, since no decision changes.
+
+        Sleeping first makes the card's contents a fact rather than an
+        assumption: free VRAM then genuinely reflects what is not ours, and the
+        ladder chooses from a clean measurement. The cost is that a controller
+        restart briefly interrupts chat -- seconds to park, then the settle
+        window before it promotes again. That is the honest price of not
+        guessing, and restarts are rare.
+        """
+        for cfg in self._config.hosts:
+            if cfg.vllm_url is None:
+                continue
+            try:
+                result = await self._actuator.sleep(cfg)
+                _log.info("host=%s startup: parked model to establish a known card (%s)",
+                          cfg.name, result.outcome)
+            except Exception:  # noqa: BLE001 -- a host we cannot park is a host we do not trust
+                _log.exception("host=%s startup: could not park model; it will be "
+                               "treated as unknown until a sample proves otherwise", cfg.name)
 
     async def stop(self) -> None:
         for task in self._tasks:
@@ -166,6 +199,15 @@ class FleetLoop:
         """Actuate if the decision demands it, then store, then publish."""
         if decision.changed:
             await self._actuate(cfg, decision)
+        else:
+            # Reconcile routing even when nothing moved. sync_routing reads
+            # /model/info and applies only the difference, so this is a no-op in
+            # the ordinary case -- and the ordinary case is not the one that
+            # matters. Drift is one-directional and permanent otherwise: the
+            # gateway's database can be restored, its container recreated, or a
+            # deployment deleted by hand, and a fleet that is sitting still
+            # produces no decisions, so nothing ever puts the catalog back.
+            await self._route(cfg, self._resident(cfg, decision))
         self._runtimes[cfg.name] = decision.runtime
         self._publish(decision)
         if decision.changed:
@@ -202,6 +244,12 @@ class FleetLoop:
         # Routing last on the way up, for the mirror-image reason: only advertise a
         # model once it is actually loadable.
         await self._route(cfg, desired)
+
+    def _resident(self, cfg: HostConfig, decision: st.Decision) -> tuple[Rung, ...]:
+        """The rungs that should be advertised for a host that is not changing."""
+        if decision.state in (HostState.YIELDING, HostState.UNKNOWN):
+            return ()
+        return (*always_on_rungs(cfg.rungs), *((decision.rung,) if decision.rung else ()))
 
     def _targets(self, cfg: HostConfig, rungs: tuple[Rung, ...]) -> tuple[RoutingTarget, ...]:
         # `vllm_url` is the server ROOT, because that is where the sleep and wake
