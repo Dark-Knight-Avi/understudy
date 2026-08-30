@@ -226,6 +226,18 @@ services:
       - --kv-cache-dtype=fp8           # halves KV cost; Ada (CC 8.9) does FP8
                                        # natively. A/B on the eval set before
                                        # making it permanent.
+      # vLLM turns chunked prefill on BY ITSELF only when max_model_len > 32768,
+      # so lowering that number to buy concurrency silently switches it off and
+      # takes most of the concurrency straight back. Measured on this host at
+      # gpu-memory-utilization 0.62, which fixes the total at 14.88 GiB:
+      #
+      #   40960, chunked ON  (implicit): activation 0.29 -> KV 5.15 -> 1.65x
+      #   16384, chunked OFF (implicit): activation 2.23 -> KV 3.21 -> 2.57x
+      #
+      # The budget never changed; the prefill buffer ate the cache. Setting it
+      # explicitly makes the behaviour independent of where max_model_len sits
+      # relative to a threshold nothing in this file mentions.
+      - --enable-chunked-prefill
       - --enable-prefix-caching        # agentic clients resend near-identical
                                        # prefixes constantly; close to free
       - --enable-sleep-mode            # level 1 parks ~17 GB of weights in GUEST
