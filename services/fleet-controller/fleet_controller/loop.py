@@ -163,7 +163,19 @@ class FleetLoop:
         window before it promotes again. That is the honest price of not
         guessing, and restarts are rare.
         """
+        # The top-rung wait (`clear_before_free`, 5 minutes) exists so a host does
+        # not snap back the moment somebody's job ends. There was no job here --
+        # we have just started -- so serving it costs five minutes of no models
+        # after every restart, for no safety at all. Pre-date `clear_since` so a
+        # genuinely clear card promotes on the first good sample; a card that is
+        # NOT clear still fails the check on its own merits.
+        now = self._clock()
+        backdated = now - self._timings.clear_before_free
+
         for cfg in self._config.hosts:
+            rt = self._runtimes.get(cfg.name)
+            if rt is not None:
+                self._runtimes[cfg.name] = rt.evolve(clear_since=backdated)
             if cfg.vllm_url is None:
                 continue
             try:
