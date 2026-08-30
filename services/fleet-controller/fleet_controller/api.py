@@ -36,6 +36,29 @@ from fleet_controller.remote import RemoteSampler
 
 _log = logging.getLogger(__name__)
 
+
+def _configure_logging() -> None:
+    """Give this service somewhere to log to.
+
+    Nothing here ever called basicConfig, so the root logger had no handler and
+    Python's last-resort handler took over -- which emits WARNING and above and
+    drops everything else. Every state transition, every rung change, every
+    startup action is logged at INFO, so all of it went to nowhere: the service
+    recorded its failures and none of its decisions.
+
+    That is the wrong half to keep. This service exists to make choices about
+    other people's hardware, and "why did it unload my model" is answerable only
+    from the decisions.
+    """
+    logging.basicConfig(
+        level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+        force=True,  # uvicorn installs its own handlers first
+    )
+
+
+_configure_logging()
+
 STATIC = Path(__file__).parent / "static"
 DEFAULT_CONFIG = Path(os.environ.get("FLEET_CONFIG", "/etc/understudy/fleet.yaml"))
 
