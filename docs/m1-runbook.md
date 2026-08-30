@@ -32,6 +32,10 @@ even though it's used last.
 
 ~17 GB. Do this first and let it run while you do everything else.
 
+**On `.226` only.** vLLM runs there; `.87` serves the gateway and UI and never
+loads a model. Downloading to `.87` puts 17 GB on the wrong machine, and on a
+smaller disk than the one meant to hold it.
+
 ```bash
 cd ~/understudy && git pull
 uv pip install huggingface-hub

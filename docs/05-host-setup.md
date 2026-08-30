@@ -81,9 +81,16 @@ passthrough that makes the GPU visible at all.
 ### Step 5 — repo and data on ext4, not `/mnt/c` (Ubuntu)
 
 ```bash
-cp -r /mnt/c/Users/<you>/Desktop/understudy ~/understudy && cd ~/understudy
+# --exclude=.venv is not optional. A virtualenv holds absolute paths and symlinks
+# to its interpreter; copied to a new location it is dead, and uv reports it as
+# "Broken virtual environment: pyvenv.cfg is missing" rather than rebuilding it.
+rsync -a --exclude='.venv' --exclude='results'   /mnt/c/Users/<you>/Desktop/understudy/ ~/understudy/
+cd ~/understudy
 echo 'export UV_LINK_MODE=copy' >> ~/.bashrc
+uv sync --all-packages --group dev          # rebuild the venv in its new home
 ```
+
+If you already copied one across, `rm -rf .venv && uv sync --all-packages --group dev`.
 
 `/mnt/c` is a 9p mount: fine for spikes, ruinous for Postgres, Docker volumes and
 model weights. On the model host, move the whole distro to the large NVMe first
