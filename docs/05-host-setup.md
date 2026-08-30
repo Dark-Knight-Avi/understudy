@@ -108,10 +108,24 @@ sudo apt update && sudo apt install -y nvidia-container-toolkit
 # `tee`ing the file afterwards silently wipes the runtime registration, and the
 # only symptom is `could not select device driver "" with capabilities: [[gpu]]`,
 # which names neither daemon.json nor the toolkit.
-echo '{"insecure-registries": ["10.0.0.87:5000"]}' | sudo tee /etc/docker/daemon.json
+# `dns` is not optional on this network. WSL writes a stub resolver
+# (10.255.255.254) into /etc/resolv.conf, and containers cannot reach it -- so
+# the DAEMON pulls images perfectly while every BUILD fails with "Name does not
+# resolve", which reads as an outage rather than a configuration gap. Campus
+# policy also blocks 8.8.8.8 and 1.1.1.1 outright, so the public resolvers are
+# not a fallback. Use the campus servers, the same ones Windows uses:
+#     Get-DnsClientServerAddress -AddressFamily IPv4   (in PowerShell)
+# `--network host` does NOT work around this: the stub is unreachable from the
+# container either way.
+sudo tee /etc/docker/daemon.json >/dev/null <<'JSON'
+{
+  "insecure-registries": ["10.0.0.87:5000"],
+  "dns": ["10.16.25.15", "10.16.25.13"]
+}
+JSON
 sudo nvidia-ctk runtime configure --runtime=docker
 sudo systemctl restart docker
-cat /etc/docker/daemon.json     # must show BOTH insecure-registries and runtimes.nvidia
+cat /etc/docker/daemon.json     # must show insecure-registries, dns, AND runtimes.nvidia
 
 # The check that matters: the card, seen from INSIDE a container.
 docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu24.04 nvidia-smi
