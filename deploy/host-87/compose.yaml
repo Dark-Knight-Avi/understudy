@@ -652,7 +652,7 @@ services:
                                 # anybody's process, structurally.
     networks: [platform]
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8099/health', timeout=3)\""]
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8099/healthz', timeout=3)\""]
       interval: 30s
       timeout: 10s
       retries: 3

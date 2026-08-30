@@ -85,3 +85,21 @@ secrets-scan:  ## fail if credentials look committed
 	@! git ls-files -z | xargs -0 grep -niE 'c[i]stup@|passw[o]rd[[:space:]]*[:=][[:space:]]*[^ $$]' \
 	  || { echo "POSSIBLE CREDENTIAL FOUND -- do not commit"; exit 1; }
 	@echo "clean"
+
+.PHONY: check-env
+check-env:  ## fail if a host's .env still carries the repo's placeholder addresses
+	@# Placeholder addresses have now surfaced three separate times mid-deploy --
+	@# in litellm's api_base, in the registry reference, and in HOST_*/COMFYUI_URL.
+	@# Each time the symptom was a connection error somewhere unrelated. This
+	@# turns that into one grep that fails before anything starts.
+	@fail=0; \
+	for f in deploy/host-*/.env; do \
+	  [ -f "$$f" ] || continue; \
+	  hits=$$(grep -nE '^[A-Z0-9_]+=.*(10\.0\.0\.|10\.0\.1\.)' "$$f" || true); \
+	  if [ -n "$$hits" ]; then echo "$$f still has placeholder addresses:"; echo "$$hits"; fail=1; fi; \
+	done; \
+	if [ "$$fail" = "1" ]; then \
+	  echo; echo "Replace them with this fleet's real addresses. deploy/fleet.local.yaml has them."; \
+	  exit 1; \
+	fi; \
+	echo "no placeholder addresses in any .env"
