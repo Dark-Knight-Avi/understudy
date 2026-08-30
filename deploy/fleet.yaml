@@ -45,6 +45,23 @@
 #  rung). The code is the authority and this file follows the code; docs/08's
 #  sketch predates it and needs updating.
 #
+#  >>> A RUNG MUST BE A MODEL THAT EXISTS. <<<
+#
+#  List only rungs some running server can actually serve right now. A rung
+#  whose weights are not on disk is not an aspiration the controller ignores --
+#  it is one it will choose, and the failure is quiet:
+#
+#    M2, .226. Four rungs configured; ONE vLLM serving ONE model, because the
+#    smaller weights were never downloaded and vllm-floor was never started. The
+#    controller sampled the card mid-restart, saw it empty, and picked the
+#    largest rung that fit an empty card (coder, 17.0). It woke the only model
+#    there was and recorded coder as resident. From then on `_available_gb` adds
+#    that 17.0 back to the 7.8 GB actually free, so coder keeps "fitting" and the
+#    host can never demote. A false belief that re-justifies itself every cycle.
+#
+#  So: add a rung when its weights land on disk and a server is configured to
+#  serve them, not when you plan to. The ladder grows with the fleet.
+#
 #  >>> A FOOTPRINT IS A CHOICE, NOT A MEASUREMENT. <<<
 #
 #  This was written expecting to *measure* each rung's appetite. That framing is
