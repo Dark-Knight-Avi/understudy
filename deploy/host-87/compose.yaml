@@ -190,6 +190,12 @@ services:
       # /24s -- Docker publishes, the firewall restricts.
       - "0.0.0.0:80:80"
       - "0.0.0.0:443:443"
+    environment:
+      # This host's LAN address, so the chat UI answers on the bare IP before
+      # anyone has set up *.ai.lan DNS. Empty is safe: the Caddyfile defaults it
+      # to an unresolvable name rather than an empty site address, which Caddy
+      # would reject at parse time.
+      PLATFORM_HOST: ${PLATFORM_HOST:-}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data             # the internal CA lives here. Losing this

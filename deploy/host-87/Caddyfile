@@ -19,8 +19,15 @@
 #  removal (../README.md).
 #
 #  NAME RESOLUTION: add A records for *.ai.lan on the internal DNS server, all
-#  pointing at 10.0.0.87. If you do not control DNS, five hosts-file lines per
-#  client machine. DNS is worth asking for; hosts files rot.
+#  pointing at .87. If you do not control DNS, five hosts-file lines per client
+#  machine. DNS is worth asking for; hosts files rot.
+#
+#  Until either exists, the chat UI also answers on the host's bare ADDRESS via
+#  $PLATFORM_HOST, so nobody is blocked on a DNS ticket to try the thing. A site
+#  block only answers for names it is addressed by: visiting the IP with no such
+#  block matches nothing, Caddy has no certificate to offer, and the browser
+#  reports ERR_SSL_PROTOCOL_ERROR -- which reads as a broken server rather than
+#  as an unconfigured hostname. That is how M1's acceptance test first failed.
 #
 #  Upstreams are addressed by SERVICE NAME over the internal Docker network
 #  (docs/16 section 4.2). There is no public DNS on that network, and there is
@@ -38,7 +45,10 @@
 }
 
 # --- Chat UI -- what the team actually visits -------------------------------
-chat.ai.lan {
+#  Addressed by BOTH its name and the host's address: the name for when DNS is
+#  in place, the address so the first colleague to try it does not need DNS at
+#  all. `tls internal` issues for an IP SAN quite happily.
+chat.ai.lan, {$PLATFORM_HOST:chat.invalid} {
 	tls internal
 	encode zstd gzip
 	reverse_proxy open-webui:8080 {
