@@ -184,14 +184,58 @@ which cannot reach each other — with nothing in any log pointing at the firewa
 
 ### Step 8 — boot task (PowerShell, admin)
 
+**Without this the platform is up only while somebody has a terminal or VS Code
+open on the host.** WSL2 is not a service: Windows starts the distro when a user
+runs `wsl.exe` and tears it down when nothing holds it. Closing an editor takes
+Docker, and therefore every container, with it. `restart: unless-stopped` cannot
+help — there is no daemon left to honour it.
+
+Run as the interactive user, NOT as SYSTEM: WSL instances are per Windows user, so
+a SYSTEM-started distro is a different instance from the one you see in a
+terminal, with different containers. That means storing the account password in
+Task Scheduler; `Get-Credential` prompts without echoing it.
+
 ```powershell
-$a = New-ScheduledTaskAction -Execute "wsl.exe" -Argument "-d Ubuntu -u root /bin/true"
-Register-ScheduledTask -TaskName "Understudy-WSL" -Action $a `
-  -Trigger (New-ScheduledTaskTrigger -AtStartup) -User "SYSTEM" -RunLevel Highest
+$cred    = Get-Credential -UserName $env:USERNAME -Message "Windows password (boot task)"
+$action  = New-ScheduledTaskAction -Execute 'C:\Windows\System32\wsl.exe' `
+             -Argument '-d Ubuntu --exec /bin/true'      # literal name; see below
+$trigger = New-ScheduledTaskTrigger -AtStartup
+$trigger.Delay = 'PT45S'    # let the network stack and NVIDIA driver come up first
+$set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+         -ExecutionTimeLimit 0 -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+
+Register-ScheduledTask -TaskName 'Understudy-WSL' -Action $action -Trigger $trigger `
+  -Settings $set -RunLevel Highest -User $env:USERNAME `
+  -Password $cred.GetNetworkCredential().Password
 ```
 
-WSL2 does not start on boot, and `restart: unless-stopped` cannot help if the VM is
-not running.
+> **Type the distro name literally.** `wsl.exe -l -q` emits UTF-16, so
+> `$d = (wsl -l -q)[0]` carries embedded nulls and the argument silently truncates
+> -- `-d Ubuntu` became `-d U`, the task ran, matched no distro, and reported
+> success. Always read the argument back:
+> ```powershell
+> (Get-ScheduledTask -TaskName 'Understudy-WSL').Actions | Select-Object Arguments
+> ```
+
+**Verify without waiting for a reboot** (this briefly stops every container):
+
+```powershell
+wsl.exe --shutdown; Start-Sleep 10
+wsl.exe -l --running                    # nothing
+Start-ScheduledTask -TaskName 'Understudy-WSL'; Start-Sleep 90
+wsl.exe -l --running                    # Ubuntu
+wsl.exe -d Ubuntu --exec docker ps --format "{{.Names}}"
+```
+
+**Then stop the machine sleeping.** A workstation that suspends when its owner
+walks away takes the platform with it, and no WSL configuration fixes that:
+
+```powershell
+powercfg /change standby-timeout-ac 0
+powercfg /change hibernate-timeout-ac 0
+powercfg /change disk-timeout-ac 0
+powercfg /hibernate off
+```
 
 ### Step 9 — verify from ANOTHER machine
 
