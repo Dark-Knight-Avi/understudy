@@ -188,7 +188,10 @@ services:
                                        # means the platform either wastes the
                                        # card or OOMs somebody's job -- the exact
                                        # outcome docs/03 exists to prevent.
-      - --max-model-len=65536          # a budget, not a maximum. Ask for 128k
+      # Per-RUNG, not per-host: each model has its own native context and vLLM
+      # refuses to start if you exceed it. Qwen3-14B is 40960; the 30B coder is
+      # far larger. Hardcoding one value guarantees a crash-loop on the other.
+      - --max-model-len=${FAST_MAX_MODEL_LEN}   # a budget, not a maximum. Ask for 128k
                                        # and there is no room for concurrency;
                                        # N4 wants 2-4 streams first. Agentic
                                        # clients are context-hungry, so this rung
