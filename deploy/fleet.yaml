@@ -53,17 +53,28 @@
 #  size only decides whether that reservation is enough to load at all, and how
 #  much of it is left for KV cache.
 #
-#  So footprint_gb and gpu_memory_utilization are two spellings of one number:
+#  So footprint_gb and gpu_memory_utilization are two spellings of one number.
+#  The exact relation, with all three M1 measurements agreeing:
 #
-#      footprint_gb  ~=  gpu_memory_utilization x total_vram_gb  +  ~1.3
+#      reserved  =  gpu_memory_utilization x total_vram_gb
+#                =  weights + non_torch + activation_peak + kv_cache
 #
-#  where the trailing term is the WSL2 CUDA context (M0 spike 1: 1.49 GiB on
-#  .226, 1.24 on .87 and .210). It is charged once per live vLLM process and is
-#  released only when the process exits -- sleep mode does NOT return it.
+#      resident  =  reserved - activation_peak + cuda_context
 #
-#  M1 measured the fast rung: FAST_GPU_UTIL=0.62 on .226's 23.99 GiB ->
-#  0.62 x 23.99 = 14.87 reserved, vLLM self-reported 14.88, nvidia-smi showed
-#  16545 MiB = 16.16 GiB resident. The identity holds to ~0.02 GiB.
+#  The activation peak is TRANSIENT -- vLLM measures it while profiling to size
+#  the KV cache, then does not hold it. The CUDA context is the opposite: 1.49
+#  GiB on .226, 1.24 on .87 and .210 (M0 spike 1), charged once per live vLLM
+#  process and returned only when the process exits. Sleep mode does NOT free it.
+#
+#  Checked against three configurations at FAST_GPU_UTIL=0.62 (reserved 14.88):
+#
+#    max_len  chunked  activation   KV     predicted   nvidia-smi
+#    40960    on         0.29      5.15      16.08      16545 MiB
+#    16384    off        2.23      3.21      14.14      14639 MiB
+#    16384    on         0.29      5.15      16.08      16545 MiB
+#
+#  Note the middle row: a SMALLER resident footprint that serves FEWER requests.
+#  Reading nvidia-smi alone would have called that an improvement.
 #
 #  The consequence for whoever tunes the ladder: DO NOT edit a footprint here
 #  without editing that rung's utilization flag in the host's compose file. They
@@ -147,12 +158,14 @@ hosts:
         always_on: false          # is why it fits at all
       - name: chat
         served_model: qwen3-14b-int4
-        # MEASURED, M1: FAST_GPU_UTIL=0.62 -> 16545 MiB resident on nvidia-smi.
-        # Was 9.0, a weights-only estimate that ignored both the KV reservation
-        # and the CUDA context -- it would have under-reported by 7 GiB and let
-        # the ladder promote into VRAM a colleague's job was already holding.
+        # MEASURED, M1: FAST_GPU_UTIL=0.62 -> 16545 MiB resident on nvidia-smi,
+        # reproduced across two max_model_len settings. Was 9.0, a weights-only
+        # estimate that ignored both the KV reservation and the CUDA context --
+        # it would have under-reported by 7 GiB and let the ladder promote into
+        # VRAM a colleague's job was already holding.
         # Weights are 9.36 GiB, so this rung cannot be driven much below ~12
-        # before there is no KV budget left to serve with.
+        # before there is no KV budget left to serve with. At this setting it
+        # sustains 4.12x concurrency at 16384 tokens and leaves 7.5 GB free.
         footprint_gb: 16.2
         always_on: false
       - name: chat-small
