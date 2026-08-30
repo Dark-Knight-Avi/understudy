@@ -385,6 +385,13 @@ services:
       ENABLE_SIGNUP: "true"
       DEFAULT_USER_ROLE: "user"      # usable immediately, no approval
       ENABLE_LOGIN_FORM: "true"
+
+      # --- Branding ----------------------------------------------------------
+      # The name on the login page, the tab title, and every "ask X" prompt in
+      # the UI. Worth setting: people trust a thing that looks like it belongs to
+      # them more than one that looks like a product they have never heard of,
+      # and this platform's whole pitch is that it is theirs.
+      WEBUI_NAME: ${WEBUI_NAME:-Understudy}
       # Open WebUI's built-in RAG is explicitly not what we use (ADR-0002,
       # upheld by ADR-0007): basic chunking, no reranking, citations too weak to
       # build a trust guarantee on. Retrieval is RAGFlow, reached as the
