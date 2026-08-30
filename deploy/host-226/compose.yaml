@@ -452,19 +452,21 @@ services:
       # 10.0.0.87 and from nowhere else.
       - "0.0.0.0:8099:8099"
     environment:
-      AGENT_TOKEN: ${AGENT_TOKEN}
-      HOST_ID: "226"
-      # The agent drives sleep/wake on both local vLLM servers by service name.
-      VLLM_FAST_URL: http://vllm-fast:8000
-      VLLM_FLOOR_URL: http://vllm-floor:8001
-      COMFYUI_URL: http://comfyui:8188
-      # Crude and conservative on purpose (docs/07 section 16): a name-matched
-      # process list plus CPU and RAM thresholds, biased toward false positives.
-      # Being wrong in the "available" direction breaks N6, which is the
-      # requirement that decides whether the platform stays installed. Being
-      # wrong in the "refused" direction only annoys someone who wanted a slow
-      # model. The costs are not symmetric, so neither is the tuning.
-      MODELLING_PROCESS_NAMES: ${MODELLING_PROCESS_NAMES}
+      # WHAT THE AGENT ACTUALLY READS (fleet_controller/agent.py): these two
+      # names and nothing else. The variables that used to sit here -- HOST_ID,
+      # AGENT_TOKEN, VLLM_*_URL, DETECT_INTERACTIVE_LOGIN -- came from the design
+      # docs and were never implemented; compose set them and the agent ignored
+      # them. The dangerous one was HOST_ID: the agent read no host name at all,
+      # answered with an empty one, and remote.py rejects an agent answering for
+      # the wrong host -- so every sample would have been discarded as a
+      # misconfigured address.
+      #
+      # Sleep/wake is driven by the CONTROLLER via actuators.py, not from here,
+      # which is why no vLLM URL belongs in this block.
+      FLEET_HOST_NAME: "226"
+      # Process names that are OURS. Anything else holding VRAM is treated as a
+      # person's work and outranks the platform (docs/03).
+      FLEET_OUR_PROCESSES: "vllm,infinity,comfyui,llama"
     volumes:
       - agent_data:/data
       # Read-only view of the host process table, so the agent can spot a

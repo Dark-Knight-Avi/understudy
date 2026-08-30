@@ -195,7 +195,15 @@ hosts:
   #  .87 -- the hub. Embeddings, and the floor that never disappears.
   # ===========================================================================
   - name: "87"
-    address: 10.0.0.87
+    # The controller runs ON this host, but still reaches it through an agent
+    # like any other -- remote.py polls every host identically, so a hub without
+    # one is reported unreachable forever. The agent here is a SIBLING CONTAINER,
+    # so this is a Docker service name rather than an address.
+    #
+    # It must not be the LAN address: under WSL2 mirrored networking a host
+    # cannot reach its own, the same hairpin that forces REGISTRY=localhost:5000
+    # in this host's .env.
+    address: fleet-agent
     total_vram_gb: 12.0
     vllm_url: http://10.0.0.87:8000
     # >>> FALSE, and this is not an oversight. <<<

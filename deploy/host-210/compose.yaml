@@ -226,11 +226,23 @@ services:
       # M0 spike 4).
       - "0.0.0.0:8099:8099"
     environment:
-      AGENT_TOKEN: ${AGENT_TOKEN}
-      HOST_ID: "210"
-      VLLM_URL: http://vllm-small:8000
-      DETECT_INTERACTIVE_LOGIN: "true"    # see fleet.yaml; TRUE here, FALSE on
-                                          # the hub
+      # WHAT THE AGENT ACTUALLY READS (fleet_controller/agent.py): these two
+      # names and nothing else. The variables that used to sit here -- HOST_ID,
+      # AGENT_TOKEN, VLLM_*_URL, DETECT_INTERACTIVE_LOGIN -- came from the design
+      # docs and were never implemented; compose set them and the agent ignored
+      # them. The dangerous one was HOST_ID: the agent read no host name at all,
+      # answered with an empty one, and remote.py rejects an agent answering for
+      # the wrong host -- so every sample would have been discarded as a
+      # misconfigured address.
+      #
+      # Sleep/wake is driven by the CONTROLLER via actuators.py, not from here,
+      # which is why no vLLM URL belongs in this block.
+      FLEET_HOST_NAME: "210"
+      # Process names that are OURS. Anything else holding VRAM is treated as a
+      # person's work and outranks the platform (docs/03).
+      FLEET_OUR_PROCESSES: "vllm,infinity,comfyui,llama"
+      # NOTE: detect_interactive_login is a HOST setting in fleet.yaml, read by
+      # the controller. It was never an agent variable.
     volumes:
       - agent_data:/data
       - /proc:/host/proc:ro     # read-only. The controller has no authority to

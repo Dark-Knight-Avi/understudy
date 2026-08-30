@@ -147,6 +147,7 @@ volumes:
   ragflow_data:
   mcp_artifacts:
   fleet_data:
+  agent_data:
   hf_cache:
 
 # -----------------------------------------------------------------------------
@@ -620,6 +621,43 @@ services:
   #  and serves the page that tells people what is going on. The dashboard is
   #  doing as much work here as the preemption logic (docs/03 Reflect).
   # ===========================================================================
+  # ===========================================================================
+  #  FLEET AGENT -- this host's own nvidia-smi, served to the controller
+  # ===========================================================================
+  #  The hub is a managed host like any other: it has a GPU, it has rungs, and
+  #  something has to sample it. The controller does NOT read nvidia-smi
+  #  directly even for the machine it runs on -- remote.py polls every host in
+  #  fleet.yaml identically, so a hub without an agent is simply reported
+  #  unreachable forever.
+  #
+  #  Reached over the internal network as `fleet-agent:8099`, and fleet.yaml
+  #  must give this host that as its `address`. Not the LAN address: under WSL2
+  #  mirrored networking a host cannot reach its own, which is the same hairpin
+  #  that forces REGISTRY=localhost:5000 here.
+  #
+  #  Deliberately NOT published. Every other host publishes 8099 because the
+  #  controller crosses the network to reach it; this one is a sibling container.
+  fleet-agent:
+    image: ${REGISTRY}/fleet-controller:${FLEET_CONTROLLER_TAG}
+    command: ["uvicorn", "fleet_controller.agent:app", "--host", "0.0.0.0", "--port", "8099"]
+    restart: unless-stopped
+    # Both fragments in one merge key: YAML permits `<<` exactly once per map.
+    <<: [*logging, *gpu]
+    environment:
+      FLEET_HOST_NAME: "87"
+      FLEET_OUR_PROCESSES: "vllm,infinity,comfyui,llama"
+    volumes:
+      - agent_data:/data
+      - /proc:/host/proc:ro     # read-only. docs/08 s1: no authority to kill
+                                # anybody's process, structurally.
+    networks: [platform]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8099/health', timeout=3)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
   fleet-controller:
     image: ${REGISTRY}/fleet-controller:${FLEET_CONTROLLER_TAG}
     restart: unless-stopped
