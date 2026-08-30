@@ -30,14 +30,14 @@ COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /bin/uv
 WORKDIR /src
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 
-# Dependencies first, as their own layer: they change far less often than the
-# source, so editing state.py does not re-resolve FastAPI.
+# One install, reading pyproject.toml. Splitting dependencies into a separate
+# cached layer would mean listing them here as well, and a second copy of a
+# dependency list is a copy that goes stale -- the build keeps succeeding
+# against versions the project no longer declares. The dependency set is five
+# packages; the saved rebuild time is not worth that.
 COPY pyproject.toml ./
-RUN uv venv /venv && VIRTUAL_ENV=/venv uv pip install --no-cache \
-      fastapi>=0.115 "uvicorn[standard]>=0.32" httpx>=0.27 pydantic>=2.9 pyyaml>=6.0
-
 COPY fleet_controller/ ./fleet_controller/
-RUN VIRTUAL_ENV=/venv uv pip install --no-cache --no-deps .
+RUN uv venv /venv && VIRTUAL_ENV=/venv uv pip install --no-cache .
 
 # --- runtime -----------------------------------------------------------------
 FROM python:3.12-slim
