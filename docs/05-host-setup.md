@@ -787,9 +787,9 @@ looks entirely correct while doing it. Check before writing any rule:
 ip -4 addr | grep -E "inet |^[0-9]"     # NOT `show eth0`: one host uses eth1
 ```
 
-Read the network off the broadcast address: `10.72.32.87/23 brd 10.72.33.255` means
-the network is `10.72.32.0/23`, and `10.72.19.210/23 brd 10.72.19.255` means
-`10.72.18.0/23`. Nothing lives in the missing halves today, which is exactly why
+Read the network off the broadcast address: `10.0.0.87/23 brd 10.0.1.255` means
+the network is `10.0.0.0/23`, and `10.0.3.210/23 brd 10.0.3.255` means
+`10.0.2.0/23`. Nothing lives in the missing halves today, which is exactly why
 this would go unnoticed until a machine is placed there.
 
 **Why this matters more than it looks.** Every platform service runs inside WSL2. Configure layer 1

@@ -273,8 +273,8 @@ materialise.
 **Both M0 gating risks are now closed.** WSL2 overhead is ~1.5 GiB rather than ~16,
 and CUDA is stable on AMD. M1 is unblocked.
 
-**The subnets are `/23`, not `/24`, and one host uses `eth1`.** `10.72.32.0/23`
-carries `.226` and `.87`; `10.72.18.0/23` carries `.210`. Every firewall rule
+**The subnets are `/23`, not `/24`, and one host uses `eth1`.** `10.0.0.0/23`
+carries `.226` and `.87`; `10.0.2.0/23` carries `.210`. Every firewall rule
 drafted before M0 used `/24` and would have covered half the address space while
 appearing correct. Nothing lives in the missing halves today, which is precisely
 why it would have surfaced months later as one machine that could not reach the
