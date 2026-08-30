@@ -1,0 +1,59 @@
+# LiteLLM gateway — the fleet's single OpenAI-compatible endpoint.
+#
+# Mounted read-only at /app/config.yaml. If this file is missing, Docker creates
+# a DIRECTORY at that path and LiteLLM dies with `IsADirectoryError` — which
+# reads as a LiteLLM bug rather than a missing file. Do not delete it.
+#
+# NAMING (docs/06): models are named by PROMISE, not by parameter count. A user
+# picking `chat` should get the same class of answer regardless of which host
+# served it. Version numbers and quantisation formats belong in `model`, never in
+# the public name.
+#
+# M1 defines ONE model. The ladder arrives at M2, when the fleet controller can
+# actually move between rungs.
+
+model_list:
+  # ---------------------------------------------------------------- fast tier
+  - model_name: chat
+    litellm_params:
+      # `openai/` tells LiteLLM to speak the OpenAI protocol to a non-OpenAI
+      # backend.
+      # Must match a --served-model-name on the backend. .226's vllm-fast
+      # answers to both `coder` and `fast-tier`; `fast-tier` is the honest one
+      # for M1, where the rung holds a 14B rather than the 30B coder.
+      model: openai/fast-tier
+      api_base: http://10.0.0.226:8000/v1
+      api_key: os.environ/VLLM_226_KEY
+    model_info:
+      # Stable id the fleet controller adds and removes deployments by.
+      id: chat-226
+
+  # --- M2 adds the rest of the ladder here: coder, chat-small, chat-tiny ---
+  # --- M4 adds deep-slow (ik_llama.cpp on :8081) ---
+  # --- M5 adds team-docs (RAGFlow) ---
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/LITELLM_DATABASE_URL
+
+  # Refuse a request the backend cannot serve rather than queueing it behind a
+  # model that is asleep. The controller pulls deployments out of routing when a
+  # host yields; this makes that removal take effect immediately.
+  enable_pre_call_checks: true
+
+litellm_settings:
+  # NOTHING leaves this network. LiteLLM phones home by default, and prompts are
+  # the most sensitive thing the platform handles (N1).
+  telemetry: false
+  turn_off_message_logging: true
+
+  # Fail fast. A hung backend must not hold a client connection open: the fleet
+  # controller may be mid-swap, and the gateway should say so rather than wait.
+  request_timeout: 600
+  num_retries: 1
+
+router_settings:
+  routing_strategy: simple-shuffle
+  # M2 populates fallbacks so a claimed host degrades to another rather than
+  # erroring. With one model there is nowhere to fall back to.
+  # fallbacks: [{"chat": ["chat-small"]}]
