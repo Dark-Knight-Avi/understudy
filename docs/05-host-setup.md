@@ -111,7 +111,7 @@ New-NetFirewallRule -DisplayName 'Understudy' -Direction Inbound -Action Allow `
 
 New-NetFirewallHyperVRule -Name 'Understudy' -DisplayName 'Understudy' `
   -Direction Inbound -VMCreatorId $wsl -Protocol TCP `
-  -LocalPorts ($ports -join ',') -Action Allow
+  -LocalPorts $ports -Action Allow      # an ARRAY -- a joined string is rejected
 ```
 
 **Layer 1 alone is not enough.** Confirmed on a real host: a service inside WSL2 was
@@ -774,7 +774,7 @@ New-NetFirewallRule -DisplayName 'Understudy' -Direction Inbound -Action Allow `
 # Layer 2 -- Hyper-V firewall. This is the one that actually gates WSL2.
 New-NetFirewallHyperVRule -Name 'Understudy' -DisplayName 'Understudy' `
   -Direction Inbound -VMCreatorId $wsl -Protocol TCP `
-  -LocalPorts ($ports -join ',') -Action Allow
+  -LocalPorts $ports -Action Allow      # an ARRAY -- a joined string is rejected
 ```
 
 Trim `$ports` to what each host actually publishes ([`ports.md`](./ports.md)).
