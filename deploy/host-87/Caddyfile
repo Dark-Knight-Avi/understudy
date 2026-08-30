@@ -37,6 +37,17 @@
 {
 	email ops@internal.invalid
 
+	# A client connecting to a bare IP sends NO SNI -- TLS server names are DNS
+	# names, and browsers and curl both omit the extension for IP literals.
+	# Caddy selects a certificate by SNI, so with nothing to match it aborts the
+	# handshake with an internal-error alert. Having a certificate for the IP is
+	# not enough; there has to be a name to look it up by.
+	#
+	# The browser reports this as ERR_SSL_PROTOCOL_ERROR and curl as
+	# "tlsv1 alert internal error", neither of which points at SNI. It reproduces
+	# on the host's own loopback, which is what separates it from a firewall.
+	default_sni {$PLATFORM_HOST:chat.ai.lan}
+
 	# docs/05 says `admin off`. We bind it to loopback INSIDE the container
 	# instead, purely so compose.yaml's healthcheck has something real to ask.
 	# 127.0.0.1 here is the container's own loopback: not published, not on any
