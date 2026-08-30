@@ -45,8 +45,11 @@ uv pip install huggingface-hub
 # This is the CHAT model: the thing that generates replies. Hugging Face is a
 # model registry, not an embeddings service -- it hosts every kind of model.
 # Embeddings arrive at M5 and come from the same place.
-uv run huggingface-cli download Qwen/Qwen3-14B-Instruct-AWQ \
-  --local-dir /models/qwen3-14b-int4
+# `huggingface-cli` is deprecated; the command is now `hf`.
+# Confirm the repo id first -- quantised repos get renamed and reorganised far
+# more often than base models, and a wrong id fails with a 404:
+#   uv run hf models ls --search "Qwen3-14B"
+uv run hf download Qwen/Qwen3-14B-AWQ --local-dir /models/qwen3-14b-int4
 ```
 
 **Why the 14B and not the 30B coder:** M1 proves the path end to end. A smaller
