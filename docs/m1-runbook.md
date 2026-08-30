@@ -64,29 +64,44 @@ NVMe rather than `/mnt/c`.
 ## Step 1 — secrets (`.87`)
 
 ```bash
-cd ~/understudy/deploy/host-87
-cp .env.example .env
-
-# Generate every secret. Never reuse a value across two of them.
-for k in POSTGRES_PASSWORD LITELLM_MASTER_KEY LITELLM_SALT_KEY LITELLM_UI_PASSWORD \
-         INFINITY_KEY RAG_SERVICE_KEY OPEN_WEBUI_GATEWAY_KEY RAGFLOW_GATEWAY_KEY \
-         WEBUI_SECRET_KEY SEARXNG_SECRET MCP_TOKEN; do
-  printf '%s=%s\n' "$k" "$(openssl rand -hex 24)"
-done >> .env
-
-$EDITOR .env      # remove the now-duplicated placeholder lines, set the paths
+cd ~/understudy
+uv run python scripts/gen-env.py deploy/host-87
 ```
 
-`.env` is gitignored. Keep a copy in your password manager — losing
+Hand-editing this file goes wrong in one specific, quiet way: the Postgres
+password appears three times — as `POSTGRES_PASSWORD`, and again inside both
+`DATABASE_URL` and `LITELLM_DATABASE_URL`. Set one, miss the others, and Postgres
+rejects the connection with an error that points at the credential rather than at
+the URL still reading `CHANGE_ME`. The generator writes all three at once, and
+gives `LITELLM_MASTER_KEY` the `sk-` prefix LiteLLM requires.
+
+Then set the values it cannot know — this fleet's real addresses, and the vLLM
+key, which **must be byte-identical to the one `.226` is serving with**:
+
+```bash
+cd ~/understudy/deploy/host-87
+setenv() { grep -q "^$1=" .env && sed -i "s|^$1=.*|$1=$2|" .env || printf '%s=%s
+' "$1" "$2" >> .env; }
+setenv VLLM_226_BASE http://<226>:8000/v1
+setenv VLLM_226_KEY  <the same key as deploy/host-226/.env>
+```
+
+`setenv` rather than plain `sed` because a `.env` generated before those keys
+existed has no line to substitute, and `sed -i` would report success having
+changed nothing.
+
+`.env` is gitignored and mode 600. Copy it into a password manager now — losing
 `WEBUI_SECRET_KEY` invalidates every session, and losing `POSTGRES_PASSWORD`
 means restoring from backup.
+
+> If it is ever lost while the stack is **running**, it is recoverable:
+> `docker inspect <container> --format '{{range .Config.Env}}{{println .}}{{end}}'`
+> prints what each container was started with. Recover before `docker compose down`.
 
 **Verify:**
 ```bash
 docker compose --env-file .env config -q && echo "compose OK"
 ```
-
----
 
 ## Step 2 — Postgres (`.87`)
 
@@ -157,9 +172,14 @@ plus context — and the first honest number to replace the 9.0 GB estimate in
 
 ```bash
 cd ~/understudy/deploy/host-87
-$EDITOR litellm/config.yaml      # point a model at http://10.0.0.226:8000
 docker compose --env-file .env up -d litellm
 ```
+
+Nothing to edit: `litellm.config.yaml` reads `os.environ/VLLM_226_BASE`, which
+Step 1 set. LiteLLM resolves `os.environ/` in **any** `litellm_params` field, not
+only `api_key`, so the real address lives in `.env` and the config stays
+committable. The gateway runs its own migrations against its own database on
+first start, so Postgres must be healthy first.
 
 **Verify:**
 ```bash
@@ -186,6 +206,21 @@ docker compose --env-file .env up -d open-webui caddy
 
 Open WebUI is deliberately **not published** — only Caddy is, so there is one front
 door with TLS.
+
+**Then mint its gateway key.** `gen-env.py` puts a random string in
+`OPEN_WEBUI_GATEWAY_KEY`, but LiteLLM only honours virtual keys minted against the
+master key. Left as generated, the UI loads and simply shows an empty model list:
+
+```bash
+set -a && . ./.env && set +a
+NEWKEY=$(curl -s -X POST http://localhost:4000/key/generate   -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H 'content-type: application/json'   -d '{"models":["chat"],"key_alias":"open-webui","metadata":{"surface":"chat-ui"}}'   | python3 -c 'import json,sys; print(json.load(sys.stdin)["key"])')
+sed -i "s|^OPEN_WEBUI_GATEWAY_KEY=.*|OPEN_WEBUI_GATEWAY_KEY=$NEWKEY|" .env
+docker compose --env-file .env up -d --force-recreate open-webui
+```
+
+`"models":["chat"]` is the point of the exercise: the key is scoped to one model,
+so revoking it later logs out exactly the chat UI and nothing else. A surface
+never gets the master key.
 
 **Verify from another machine on the LAN:**
 ```
@@ -238,7 +273,10 @@ milestone rather than a later one.
 
 | Symptom | First thing to check |
 |---|---|
+| `curl` returns **`000`** — even on the host itself | The service is on a `internal: true` network. Docker **silently ignores `ports:`** there: no error, no published mapping, and `docker compose ps` shows an empty PORTS column while the container is healthy and answering its own healthcheck. It needs a second, non-internal network. Cost half of M1's bring-up on two separate hosts |
 | Reachable locally, not from another host | Hyper-V firewall layer ([`05`](./05-host-setup.md) §7) |
+| UI loads but the model dropdown is empty | `OPEN_WEBUI_GATEWAY_KEY` was never minted — Step 6 |
+| Replies contain literal `<think>` tags | `--reasoning-parser=qwen3` missing from the vLLM args |
 | Gateway returns 404 for a model | Name mismatch between `litellm/config.yaml` and vLLM's `--served-model-name` |
 | vLLM OOMs on load | `--gpu-memory-utilization` too high, or another process holds VRAM |
 | Everything gone after a reboot | WSL2 did not start — the boot task ([`05`](./05-host-setup.md) §8) |
@@ -248,6 +286,10 @@ milestone rather than a later one.
 
 ## Then
 
-Record the measured vLLM footprint in `fleet.local.yaml`, and go to **M2** — the
+Record the fast rung's footprint in `fleet.local.yaml` — M1 measured **16.2 GB**
+resident at `FAST_GPU_UTIL=0.62`, against the 9.0 GB the file guessed. Note *why*
+they differ: vLLM reserves `utilization x TOTAL` up front, so the footprint is set
+by that flag rather than by the model, and the two must be edited together
+([`deploy/fleet.yaml`](../deploy/fleet.yaml) header). Then go to **M2** — the
 fleet controller, the toggle, and the ladder. That is what makes the platform a
 guest rather than a squatter, and it should not wait.
