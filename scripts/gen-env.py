@@ -44,6 +44,10 @@ SECRET_KEYS = {
     "AGENT_TOKEN",
 }
 
+# LiteLLM rejects a master key without this prefix, and the error it gives
+# points at authentication rather than at the key's shape.
+PREFIXED = {"LITELLM_MASTER_KEY": "sk-"}
+
 # Sensible non-secret defaults for keys that would otherwise be blank.
 DEFAULTS = {"LITELLM_UI_USERNAME": "admin"}
 
@@ -88,7 +92,7 @@ def main() -> int:
         key, val, comment = m["key"], m["val"].strip(), m["comment"] or ""
 
         if not val and key in SECRET_KEYS:
-            val = secrets.token_hex(24)
+            val = PREFIXED.get(key, "") + secrets.token_hex(24)
             generated.append(key)
             if key == "POSTGRES_PASSWORD":
                 postgres_password = val

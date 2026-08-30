@@ -22,7 +22,10 @@ model_list:
       # answers to both `coder` and `fast-tier`; `fast-tier` is the honest one
       # for M1, where the rung holds a 14B rather than the 30B coder.
       model: openai/fast-tier
-      api_base: http://10.0.0.226:8000/v1
+      # Real addresses do not live in the repo (same rule as fleet.local.yaml).
+      # LiteLLM resolves `os.environ/` in any litellm_params field, not just
+      # api_key, so the host is configuration rather than a committed constant.
+      api_base: os.environ/VLLM_226_BASE
       api_key: os.environ/VLLM_226_KEY
     model_info:
       # Stable id the fleet controller adds and removes deployments by.

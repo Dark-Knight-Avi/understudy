@@ -312,6 +312,8 @@ services:
       # LiteLLM gets its OWN database on the same server, never the platform's
       # application database -- it runs its own migrations (docs/06 section 4).
       DATABASE_URL: ${LITELLM_DATABASE_URL}
+      VLLM_226_BASE: ${VLLM_226_BASE}
+      VLLM_210_BASE: ${VLLM_210_BASE}
       VLLM_226_KEY: ${VLLM_226_KEY}
       VLLM_87_KEY: ${VLLM_87_KEY}
       VLLM_210_KEY: ${VLLM_210_KEY}
