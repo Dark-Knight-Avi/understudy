@@ -28,7 +28,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from fleet_controller.actuators import HttpActuator
+from fleet_controller.actuators import HttpActuator, LiteLlmEndpoints
 from fleet_controller.config import FleetConfig, load
 from fleet_controller.loop import FleetLoop
 from fleet_controller.models import HostState, HostStatus
@@ -82,6 +82,31 @@ def _is_ready(s: HostStatus) -> bool:
     return s.state is HostState.YIELDING and s.current_rung is None
 
 
+def _litellm_endpoints() -> LiteLlmEndpoints | None:
+    """The gateway's admin API, from the environment, or None if not configured.
+
+    Without this the controller samples and sleeps correctly but never touches
+    routing -- so a host that yields has its model parked while LiteLLM keeps
+    sending it traffic. The user-visible symptom is chat failing *after* the
+    platform politely got out of the way, which reads as the platform being
+    broken rather than as a missing setting. It logged only
+    "no LiteLLM endpoint configured" once per host per cycle.
+
+    None is a legitimate answer -- a single-host deployment with no gateway is
+    coherent -- so this warns rather than raises. It must stay loud: a controller
+    that cannot reroute is half a controller.
+    """
+    base = os.environ.get("LITELLM_BASE_URL", "").strip()
+    key = os.environ.get("LITELLM_MASTER_KEY", "").strip()
+    if not base or not key:
+        _log.warning(
+            "LITELLM_BASE_URL/LITELLM_MASTER_KEY unset: routing will NOT be updated "
+            "when a host yields, and the gateway will keep routing to sleeping models"
+        )
+        return None
+    return LiteLlmEndpoints(base_url=base.rstrip("/"), master_key=key)
+
+
 def create_app(
     config: FleetConfig | None = None,
     *,
@@ -98,7 +123,9 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         cfg = config or load(DEFAULT_CONFIG)
         client = httpx.AsyncClient()
-        fleet = loop or FleetLoop(cfg, RemoteSampler(client), HttpActuator(client))
+        fleet = loop or FleetLoop(
+            cfg, RemoteSampler(client), HttpActuator(client, litellm=_litellm_endpoints())
+        )
         app.state.fleet = fleet
         task: asyncio.Task[None] | None = None
         if run_loop:
