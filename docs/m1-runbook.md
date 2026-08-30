@@ -227,6 +227,22 @@ never gets the master key.
 https://10.0.0.87
 ```
 
+Also reachable at `https://<host-ip>` — the chat block is addressed by both its
+name and `$PLATFORM_HOST` so nobody is blocked on a DNS ticket to try it.
+
+The certificate warning is expected until each client trusts Caddy's local CA
+root. Do that once, before the team arrives, rather than teaching people to click
+through warnings:
+
+```bash
+docker compose exec caddy cat /data/caddy/pki/authorities/local/root.crt > caddy-root.crt
+# Windows: import to "Trusted Root Certification Authorities" (Local Machine)
+# Linux:   /usr/local/share/ca-certificates/ then update-ca-certificates
+```
+
+That root lives in the `caddy_data` volume — `docker compose down -v` destroys it
+and every client has to trust a new one. Copy it off first.
+
 First account created becomes the admin. Create yours before telling anyone the URL.
 
 ---
@@ -276,6 +292,8 @@ milestone rather than a later one.
 | `curl` returns **`000`** — even on the host itself | The service is on a `internal: true` network. Docker **silently ignores `ports:`** there: no error, no published mapping, and `docker compose ps` shows an empty PORTS column while the container is healthy and answering its own healthcheck. It needs a second, non-internal network. Cost half of M1's bring-up on two separate hosts |
 | Reachable locally, not from another host | Hyper-V firewall layer ([`05`](./05-host-setup.md) §7) |
 | UI loads but the model dropdown is empty | `OPEN_WEBUI_GATEWAY_KEY` was never minted — Step 6 |
+| **`ERR_SSL_PROTOCOL_ERROR`** in the browser, or curl's `tlsv1 alert internal error`, when visiting the host by **IP** | No SNI. TLS server names are DNS names, so browsers and curl omit the extension entirely for IP literals, and Caddy selects certificates by SNI — having a certificate for the IP is not enough, there must be a name to look it up by. Fixed by `default_sni` in the Caddyfile global block. Reproduces on the host's own loopback, which is how you tell it apart from the firewall faults below |
+| Caddy answers on loopback but `000` from the host to its **own** LAN IP | WSL2 mirrored-networking hairpin, not a firewall. Test from a *different* host before chasing it — `.226 → .87` returning 200 while `.87 → .87` returns 000 is the expected shape |
 | Replies contain literal `<think>` tags | `--reasoning-parser=qwen3` missing from the vLLM args |
 | Gateway returns 404 for a model | Name mismatch between `litellm/config.yaml` and vLLM's `--served-model-name` |
 | vLLM OOMs on load | `--gpu-memory-utilization` too high, or another process holds VRAM |
