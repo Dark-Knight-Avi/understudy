@@ -7,17 +7,17 @@ All on local open-weight models. No paid services. No document ever leaves your 
 
 > **Why "Understudy"?** An understudy performs when the stage is free and steps aside the instant
 > the principal returns. That is the single most distinctive property of this system: it lives on
-> four workstations that people use for their real work every day, and its first duty is to be
+> workstations that people use for their real work every day, and its first duty is to be
 > unnoticeable to them.
 
 ---
 
 | | |
 |---|---|
-| **Status** | Design complete · Core services built · Hardware validation (M0) not started |
-| **Tests** | 373 passing · `ruff` clean · `mypy --strict` clean |
-| **Stack** | Python 3.11 · FastAPI · vLLM · Postgres+pgvector · Docker Compose |
-| **Scale** | 10 seats · 4 GPU workstations · 64 GB VRAM · 512 GB RAM |
+| **Status** | **Running.** M0 ✅ · M1 ✅ chat live · M2 🟡 coexistence gate passed — [delivery plan](docs/delivery-plan.md#6-milestone-plan) |
+| **Tests** | 395 passing · `ruff` clean · `mypy --strict` clean |
+| **Stack** | Python 3.12 · FastAPI · vLLM · LiteLLM · Postgres+pgvector · Docker Compose |
+| **Scale** | ~10 seats · 3 GPU workstations · 48 GB VRAM · 416 GB RAM |
 | **Cost** | Zero recurring |
 
 ---
