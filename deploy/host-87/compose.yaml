@@ -577,6 +577,12 @@ services:
                                       # Measure it (docs/07 section 7) and record
                                       # the answer before trusting this number.
       - --max-model-len=${SMALL_MAX_MODEL_LEN}
+      # Explicit, for the reason spelled out in .226's compose: vLLM enables this
+      # by itself only above max_model_len 32768, so any value chosen for
+      # concurrency silently switches it off and a single-pass prefill buffer
+      # takes the space back out of the KV cache. Measured here: activation 1.21
+      # GiB and 1.45x concurrency without it.
+      - --enable-chunked-prefill
       - --max-num-seqs=4
       - --enable-sleep-mode
       - --disable-log-requests        # prompts do not belong in container logs
