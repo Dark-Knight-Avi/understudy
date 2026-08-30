@@ -462,8 +462,17 @@ services:
       DO_NOT_TRACK: "true"
     volumes:
       - infinity_cache:/cache/huggingface
-    ports:
-      - "0.0.0.0:7997:7997"
+    # NO `ports:`. This service is on the internal network, where Docker
+    # SILENTLY IGNORES a published port -- the mapping never appears and the
+    # container looks healthy while nothing can reach it (it cost hours on .226).
+    #
+    # It does not need one. Everything that calls it -- LiteLLM, the fleet
+    # controller -- is a sibling container, so `infinity-embed:7997` reaches it over
+    # `platform` and the egress boundary stays intact. fleet.local.yaml addresses
+    # this host's vLLM by service name for the same reason.
+    #
+    # To reach it by hand: `docker compose exec infinity-embed python -c ...`, or curl
+    # from another container on the network.
     networks: [platform]
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:7997/health', timeout=5)\""]
@@ -495,8 +504,17 @@ services:
                             # workstation; leave the rest of the box alone (N5).
     volumes:
       - infinity_cache:/cache/huggingface
-    ports:
-      - "0.0.0.0:7998:7998"
+    # NO `ports:`. This service is on the internal network, where Docker
+    # SILENTLY IGNORES a published port -- the mapping never appears and the
+    # container looks healthy while nothing can reach it (it cost hours on .226).
+    #
+    # It does not need one. Everything that calls it -- LiteLLM, the fleet
+    # controller -- is a sibling container, so `infinity-rerank:7998` reaches it over
+    # `platform` and the egress boundary stays intact. fleet.local.yaml addresses
+    # this host's vLLM by service name for the same reason.
+    #
+    # To reach it by hand: `docker compose exec infinity-rerank python -c ...`, or curl
+    # from another container on the network.
     networks: [platform]
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:7998/health', timeout=5)\""]
@@ -519,8 +537,17 @@ services:
     ipc: host                         # long after you have forgotten this step.
                                       # ipc: host because vLLM needs a large
                                       # /dev/shm.
-    ports:
-      - "0.0.0.0:8000:8000"
+    # NO `ports:`. This service is on the internal network, where Docker
+    # SILENTLY IGNORES a published port -- the mapping never appears and the
+    # container looks healthy while nothing can reach it (it cost hours on .226).
+    #
+    # It does not need one. Everything that calls it -- LiteLLM, the fleet
+    # controller -- is a sibling container, so `vllm-small:8000` reaches it over
+    # `platform` and the egress boundary stays intact. fleet.local.yaml addresses
+    # this host's vLLM by service name for the same reason.
+    #
+    # To reach it by hand: `docker compose exec vllm-small python -c ...`, or curl
+    # from another container on the network.
     volumes:
       - ${MODELS_DIR}:/models:ro      # declared data directory, read-only
       - hf_cache:/root/.cache/huggingface
@@ -542,14 +569,14 @@ services:
       - --kv-cache-dtype=fp8          # Ada (CC 8.9) supports FP8 natively. A/B
                                       # it on the eval set before making it
                                       # permanent (docs/07 section 5).
-      - --gpu-memory-utilization=0.45 # SEMANTICS ARE VERSION-DEPENDENT: whether
+      - --gpu-memory-utilization=${SMALL_GPU_UTIL}  # SEMANTICS ARE VERSION-DEPENDENT: whether
                                       # this is a fraction of TOTAL or of FREE
                                       # VRAM has varied between vLLM versions,
                                       # and it is the single flag that decides
                                       # whether the sharing policy is safe.
                                       # Measure it (docs/07 section 7) and record
                                       # the answer before trusting this number.
-      - --max-model-len=16384
+      - --max-model-len=${SMALL_MAX_MODEL_LEN}
       - --max-num-seqs=4
       - --enable-sleep-mode
       - --disable-log-requests        # prompts do not belong in container logs

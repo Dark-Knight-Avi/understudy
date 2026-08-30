@@ -59,6 +59,21 @@ litellm_settings:
 
 router_settings:
   routing_strategy: simple-shuffle
-  # M2 populates fallbacks so a claimed host degrades to another rather than
-  # erroring. With one model there is nowhere to fall back to.
-  # fallbacks: [{"chat": ["chat-small"]}]
+
+  # THIS IS WHAT MAKES YIELDING INVISIBLE. When someone claims .226, the
+  # controller deletes `chat` from the catalog and parks the model. Without a
+  # fallback the next request 404s, and the user experiences the platform's good
+  # manners as an outage.
+  #
+  # `chat-small` is a genuinely smaller model on a DIFFERENT host (.87), not a
+  # lower rung on the contended one. Swapping models on .226 would need the agent
+  # to restart vLLM with different weights -- verbs it does not implement -- and
+  # would hand a service the power to restart processes on somebody's
+  # workstation, which docs/08 section 6.4 is deliberately careful about. Falling
+  # back to idle hardware needs neither.
+  #
+  # The honest consequence: while .226 is claimed, answers come from a 4B model
+  # and are noticeably weaker. Better than nothing, worse than the 14B, and the
+  # dashboard shows which rung is live so the drop is visible rather than
+  # mysterious.
+  fallbacks: [{"chat": ["chat-small"]}]
