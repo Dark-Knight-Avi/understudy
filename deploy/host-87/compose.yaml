@@ -694,6 +694,13 @@ services:
       DATABASE_URL: ${DATABASE_URL}        # leases go in Postgres, one table,
                                            # not a new datastore (docs/08 s8.2)
       LITELLM_BASE_URL: http://litellm:4000
+      # The backends' keys, forwarded when registering a deployment. LiteLLM
+      # resolves `os.environ/` only for its config FILE; a database-registered
+      # deployment stores the literal, so the gateway would send the reference
+      # itself as the bearer token and every request would 401.
+      VLLM_226_KEY: ${VLLM_226_KEY}
+      VLLM_87_KEY: ${VLLM_87_KEY}
+      VLLM_210_KEY: ${VLLM_210_KEY}
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}   # the controller is the ONLY
                                                   # writer of the catalog
                                                   # (docs/06 section 7). Nobody

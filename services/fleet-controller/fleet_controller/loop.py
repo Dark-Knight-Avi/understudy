@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
@@ -211,11 +212,21 @@ class FleetLoop:
         base = (cfg.vllm_url or "").rstrip("/")
         api_base = base if base.endswith("/v1") else f"{base}/v1"
 
-        # An `os.environ/NAME` reference, resolved by the GATEWAY, so the key
-        # never crosses this wire. The name has to be one LiteLLM actually holds:
-        # compose gives it VLLM_226_KEY, VLLM_87_KEY, VLLM_210_KEY -- per host,
-        # never a bare VLLM_KEY.
-        key_ref = f"os.environ/VLLM_{cfg.name}_KEY"
+        # The backend's key. An `os.environ/NAME` reference would be preferable --
+        # nothing secret on this wire -- and LiteLLM does resolve those, but only
+        # for deployments declared in its config FILE. A deployment registered
+        # through /model/new is stored in the database with its api_key
+        # encrypted, and what gets encrypted is the literal string: the gateway
+        # then sends "os.environ/VLLM_226_KEY" as the bearer token and vLLM
+        # answers 401. The symptom points at credentials, which is where the
+        # hours go, rather than at where the credential was resolved.
+        #
+        # So send the value when we hold it. It travels controller -> gateway on
+        # the internal Docker network and is stored encrypted under
+        # LITELLM_SALT_KEY. The reference stays as the fallback: it is correct
+        # for a config-file catalog, and a wrong-but-inert key beats crashing.
+        env_name = f"VLLM_{cfg.name}_KEY"
+        key_ref = os.environ.get(env_name) or f"os.environ/{env_name}"
 
         return tuple(
             RoutingTarget(
