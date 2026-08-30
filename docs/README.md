@@ -54,8 +54,8 @@ revised after each ships so they describe what actually shipped rather than what
 
 | | Outcome | State |
 |---|---|---|
-| **M0** | Spikes: measure before committing. **Everything gates on this** | Not started — **do this next** |
-| **M1** | Chat online — the team can log in and use it | Blocked on M0 |
+| **M0** | Spikes: measure before committing | **Gates cleared** — spikes 1, 2, 4 pass; 5 pending a real workload |
+| **M1** | Chat online — the team can log in and use it | **Unblocked — next** |
 | **M1.5** | RAGFlow spike — adopt retrieval or build it ([ADR-0007](./adr/0007-adopt-ragflow-for-retrieval.md)) | Blocked on M1 |
 | **M2** | Coexistence — platform and user GPU jobs share machines safely | Blocked on M0/M1 |
 | **M3** | Coding — OpenCode + Cline on local models | Blocked |

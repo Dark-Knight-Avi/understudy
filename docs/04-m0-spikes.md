@@ -263,6 +263,16 @@ Accepted as DEGRADED rather than chased. `.210`'s work is kilobyte-scale API cal
 carries thousands per second. The only real cost is a first Docker pull from the
 registry taking ~10 minutes instead of one. Worth a cable swap, not worth a day.
 
+**The AMD cache-coherency risk does not apply.** Two hours of saturated CUDA load
+on the Threadripper: 1,082,616 iterations, no hang, no crash, and throughput flat at
+150.4 iters/s from the first minute to the last — identical to the 1.7-minute
+reading. NVIDIA documents this fault for CUDA under WSL2 on AMD Ryzen and it was
+the single risk that could have forced serving off `.226` entirely. It did not
+materialise.
+
+**Both M0 gating risks are now closed.** WSL2 overhead is ~1.5 GiB rather than ~16,
+and CUDA is stable on AMD. M1 is unblocked.
+
 **The subnets are `/23`, not `/24`, and one host uses `eth1`.** `10.72.32.0/23`
 carries `.226` and `.87`; `10.72.18.0/23` carries `.210`. Every firewall rule
 drafted before M0 used `/24` and would have covered half the address space while
@@ -305,7 +315,7 @@ before building, made concretely.
 | 1 | `.226` usable VRAM | GiB allocatable | >= 21 | **22.50** (of 23.99; 1.49 overhead) | **PASS** |
 | 1b | `.210` usable VRAM | GiB allocatable, during a normal working day | measured | **10.75** (of 11.99; 1.24 overhead) | **PASS** — but taken while the card was idle; re-read under real use |
 | 1c | `.87` usable VRAM | GiB allocatable | measured | **10.75** (of 11.99; 1.24 overhead) | **PASS** |
-| 2 | `.226` CUDA soak | 2 h clean | pass | | |
+| 2 | `.226` CUDA soak | 2 h clean | pass | **120.0 min, 1,082,616 iters, 150.4/s flat** | **PASS** |
 | 3 | `.149` Blackwell *(optional)* | `sm_120` present | pass | | |
 | 4 | Cross-subnet link `.149` | Mbit/s, latency | >= 500, < 5 ms | | |
 | 4b | Cross-subnet link `.210` | Mbit/s, latency | >= 500, < 5 ms | **94.8 Mbit/s** (100 Mbps physical link) | **DEGRADED — accepted** |
