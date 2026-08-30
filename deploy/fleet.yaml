@@ -45,12 +45,31 @@
 #  rung). The code is the authority and this file follows the code; docs/08's
 #  sketch predates it and needs updating.
 #
-#  >>> EVERY FOOTPRINT BELOW IS A HYPOTHESIS. <<<  They are weights-only
-#  estimates from docs/02 section 3. Real footprints include the KV cache budget
-#  and the CUDA context, and must be confirmed against nvidia-smi once the rung
-#  is actually running (M0 spike 1, then M2). A rung whose configured footprint
-#  is smaller than its real one silently eats the headroom protecting somebody's
-#  job -- the one error this service must not make.
+#  >>> A FOOTPRINT IS A CHOICE, NOT A MEASUREMENT. <<<
+#
+#  This was written expecting to *measure* each rung's appetite. That framing is
+#  wrong for vLLM. vLLM reserves `--gpu-memory-utilization x TOTAL` at startup
+#  and never grows past it, so a rung consumes what we told it to consume. Model
+#  size only decides whether that reservation is enough to load at all, and how
+#  much of it is left for KV cache.
+#
+#  So footprint_gb and gpu_memory_utilization are two spellings of one number:
+#
+#      footprint_gb  ~=  gpu_memory_utilization x total_vram_gb  +  ~1.3
+#
+#  where the trailing term is the WSL2 CUDA context (M0 spike 1: 1.49 GiB on
+#  .226, 1.24 on .87 and .210). It is charged once per live vLLM process and is
+#  released only when the process exits -- sleep mode does NOT return it.
+#
+#  M1 measured the fast rung: FAST_GPU_UTIL=0.62 on .226's 23.99 GiB ->
+#  0.62 x 23.99 = 14.87 reserved, vLLM self-reported 14.88, nvidia-smi showed
+#  16545 MiB = 16.16 GiB resident. The identity holds to ~0.02 GiB.
+#
+#  The consequence for whoever tunes the ladder: DO NOT edit a footprint here
+#  without editing that rung's utilization flag in the host's compose file. They
+#  cannot drift apart quietly -- a footprint smaller than the real reservation
+#  silently eats the headroom protecting somebody's job, which is the one error
+#  this service must not make.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -128,7 +147,13 @@ hosts:
         always_on: false          # is why it fits at all
       - name: chat
         served_model: qwen3-14b-int4
-        footprint_gb: 9.0
+        # MEASURED, M1: FAST_GPU_UTIL=0.62 -> 16545 MiB resident on nvidia-smi.
+        # Was 9.0, a weights-only estimate that ignored both the KV reservation
+        # and the CUDA context -- it would have under-reported by 7 GiB and let
+        # the ladder promote into VRAM a colleague's job was already holding.
+        # Weights are 9.36 GiB, so this rung cannot be driven much below ~12
+        # before there is no KV budget left to serve with.
+        footprint_gb: 16.2
         always_on: false
       - name: chat-small
         served_model: qwen3-8b-int4
