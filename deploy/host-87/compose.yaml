@@ -362,7 +362,20 @@ services:
       OPENAI_API_KEY: ${OPEN_WEBUI_GATEWAY_KEY}   # the per-surface virtual key,
                                                   # never the master key
       WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY}
-      WEBUI_URL: https://chat.ai.lan
+      # Used for links the UI generates about itself. chat.ai.lan needs the DNS
+      # records docs/05 asks for; until those exist set WEBUI_URL in .env to the
+      # host address people actually type.
+      WEBUI_URL: ${WEBUI_URL:-https://chat.ai.lan}
+
+      # --- Who can get in (docs/18) -----------------------------------------
+      # Stated explicitly rather than inherited. Open WebUI's defaults are what
+      # we want today, but a default is a decision someone else can change in a
+      # version bump -- and the failure direction here is silent: new accounts
+      # would stop needing approval and anyone who can reach this host would be
+      # in, with no error and nothing in a log to notice.
+      ENABLE_SIGNUP: "true"          # colleagues self-register; no per-user setup
+      DEFAULT_USER_ROLE: "pending"   # ...but an admin must approve each one
+      ENABLE_LOGIN_FORM: "true"
       # Open WebUI's built-in RAG is explicitly not what we use (ADR-0002,
       # upheld by ADR-0007): basic chunking, no reranking, citations too weak to
       # build a trust guarantee on. Retrieval is RAGFlow, reached as the
