@@ -7,7 +7,18 @@
 > [`05`](./05-host-setup.md) §5.3 — `insecure-registries`, `dns`, **and**
 > `runtimes.nvidia`.
 >
-> **Status: the gate passes.** Measured on the real fleet, 2026-08-30.
+> **Status: the gate passes.** Measured on the real fleet, 2026-08-30, over a
+> full claim -> yield -> release -> reclaim cycle with **zero failed requests**:
+>
+> | | |
+> |---|---|
+> | Claim -> card released | 22.6 GB free in ~12 s, flat for 2 min |
+> | Wake from sleep | 1.36 s (weights + KV, vLLM's own figure) |
+> | Release -> rung restored | ~5 min (the `clear_before_free` window, by design) |
+> | Chat during all of it | 200 at every sample, from the standby on `.87` |
+>
+> The five minutes are deliberate: a host that snapped back the instant a job
+> ended would thrash against anyone working in short bursts.
 
 ---
 
