@@ -229,6 +229,26 @@ class FleetLoop:
         if decision.changed:
             await self._actuate(cfg, decision)
         else:
+            # INVARIANT: no rung means the model is parked. Enforced every tick,
+            # not just at startup, because vLLM restarts itself -- it is
+            # `restart: unless-stopped` -- and comes back holding its full
+            # reservation without telling anyone.
+            #
+            # The controller then believes it holds no rung, sees 16 GB in use,
+            # attributes all of it to a stranger by subtraction, and concludes
+            # nothing in the ladder fits. It is stuck there permanently: no
+            # decision changes, so nothing re-examines it, and a host with a
+            # perfectly good model loaded serves nothing. Observed on .226 after
+            # its containers restarted underneath a running controller.
+            #
+            # `sleep` is idempotent and answers ALREADY when the model is already
+            # parked, so this costs one cheap call per tick on an idle host.
+            if decision.rung is None and cfg.vllm_url is not None and decision.state in (
+                HostState.SHARING,
+                HostState.FREE,
+            ):
+                await self._actuator.sleep(cfg)
+
             # Reconcile routing even when nothing moved. sync_routing reads
             # /model/info and applies only the difference, so this is a no-op in
             # the ordinary case -- and the ordinary case is not the one that
