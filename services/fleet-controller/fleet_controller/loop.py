@@ -163,23 +163,40 @@ class FleetLoop:
         window before it promotes again. That is the honest price of not
         guessing, and restarts are rare.
         """
-        # The top-rung wait (`clear_before_free`, 5 minutes) exists so a host does
-        # not snap back the moment somebody's job ends. There was no job here --
-        # we have just started -- so serving it costs five minutes of no models
-        # after every restart, for no safety at all. Pre-date `clear_since` so a
-        # genuinely clear card promotes on the first good sample; a card that is
-        # NOT clear still fails the check on its own merits.
+        # A host starts UNKNOWN, and leaving UNKNOWN routes through `_recover`,
+        # which yields and clears `clear_since` -- correctly, because recovering
+        # from blindness means something may have started unseen. A cold start is
+        # not blindness: we have just parked every model ourselves and know
+        # precisely what is on each card.
+        #
+        # Treated as a recovery, the fleet then serves the full five-minute
+        # top-rung wait before promoting anything, so every controller restart
+        # costs five minutes with an empty catalog and chat returning 400 --
+        # protecting against a job that never existed.
+        #
+        # So enter YIELDING directly, which is exactly true once the park below
+        # succeeds, with `clear_since` pre-dated so a genuinely clear card
+        # promotes on the first good sample. A card that is NOT clear still fails
+        # on its own merits: this removes a wait, not a safeguard.
         now = self._clock()
         backdated = now - self._timings.clear_before_free
 
         for cfg in self._config.hosts:
-            rt = self._runtimes.get(cfg.name)
-            if rt is not None:
-                self._runtimes[cfg.name] = rt.evolve(clear_since=backdated)
             if cfg.vllm_url is None:
                 continue
             try:
                 result = await self._actuator.sleep(cfg)
+                rt = self._runtimes.get(cfg.name)
+                if rt is not None:
+                    self._runtimes[cfg.name] = rt.evolve(
+                        state=HostState.YIELDING,
+                        state_since=now,
+                        rung=None,
+                        rung_since=now,
+                        rung_available_gb=0.0,
+                        settle_until=None,
+                        clear_since=backdated,
+                    )
                 _log.info("host=%s startup: parked model to establish a known card (%s)",
                           cfg.name, result.outcome)
             except Exception:  # noqa: BLE001 -- a host we cannot park is a host we do not trust
