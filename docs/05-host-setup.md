@@ -90,6 +90,24 @@ sudo usermod -aG docker $USER && newgrp docker
 docker compose version        # must print v2.x
 ```
 
+**On every GPU host, also install the NVIDIA container toolkit.** Docker cannot
+pass a GPU into a container without it, and the failure surfaces inside whatever
+you were trying to run rather than as a Docker error:
+
+```bash
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey   | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list   | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g'   | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+sudo apt update && sudo apt install -y nvidia-container-toolkit
+sudo nvidia-ctk runtime configure --runtime=docker
+sudo systemctl restart docker
+
+# The check that matters: the card, seen from INSIDE a container.
+docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu24.04 nvidia-smi
+```
+
+`nvidia-smi` working on the host proves nothing about this -- the host talks to
+the driver directly, while a container needs the toolkit's runtime hook.
+
 Then the repo:
 
 ```bash
