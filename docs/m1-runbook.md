@@ -289,6 +289,7 @@ milestone rather than a later one.
 
 | Symptom | First thing to check |
 |---|---|
+| A deploy keeps running the OLD image however often you edit the tag and recreate | **The shell environment beats `--env-file`.** `set -a && . ./.env && set +a` -- run to get `$LITELLM_MASTER_KEY` for a curl -- exports every variable in the file, and Compose then prefers the exported value over the file it is told to read. Editing `.env` afterwards changes nothing, `docker compose ps` shows the stale tag, and the bug you just fixed appears unfixed. `unset` the variable, or read single values with `grep '^KEY=' .env \| cut -d= -f2-` instead of sourcing the whole file |
 | `curl` returns **`000`** — even on the host itself | The service is on a `internal: true` network. Docker **silently ignores `ports:`** there: no error, no published mapping, and `docker compose ps` shows an empty PORTS column while the container is healthy and answering its own healthcheck. It needs a second, non-internal network. Cost half of M1's bring-up on two separate hosts |
 | Reachable locally, not from another host | Hyper-V firewall layer ([`05`](./05-host-setup.md) §7) |
 | UI loads but the model dropdown is empty | `OPEN_WEBUI_GATEWAY_KEY` was never minted — Step 6 |
