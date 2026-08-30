@@ -55,6 +55,10 @@ def _configure_logging() -> None:
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
         force=True,  # uvicorn installs its own handlers first
     )
+    # httpx logs every request at INFO. This service polls each host every two
+    # seconds and reconciles routing on each tick, so that is several lines per
+    # second of "GET /gpu 200" -- which buries the decisions this exists to show.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 _configure_logging()
