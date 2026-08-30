@@ -234,6 +234,17 @@ services:
                                        # asleep; that number decides how many
                                        # rungs can stay resident (docs/07 s5).
       - --swap-space=4                 # GiB, and it counts against the cap too
+      # Qwen3 is a hybrid reasoning model: it emits its scratchpad in <think>
+      # tags before the answer. Without a parser those tags land in `content`
+      # verbatim, so the chat UI shows the model's deliberation as if it were
+      # the reply. M1's first end-to-end call, asked to reply with just "ok",
+      # returned a think block wrapping the word "Okay." and only then the
+      # actual answer -- every reply would have looked like that.
+      #
+      # This routes the scratchpad to a separate `reasoning_content` field,
+      # which Open WebUI renders as a collapsible section. Keeps what thinking
+      # buys, without presenting it as the answer.
+      - --reasoning-parser=qwen3
       - --disable-log-requests         # a colleague's prompts do not belong in
                                        # a container log
     networks: [platform, lan]
