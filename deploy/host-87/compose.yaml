@@ -355,6 +355,34 @@ services:
     restart: unless-stopped
     <<: *logging
     environment:
+      # --- WHY THE LINES BELOW ARE NOT AUTOMATICALLY IN EFFECT ---------------
+      # Open WebUI classes most of them as PersistentConfig: at boot it reads the
+      # value from the DATABASE and consults the environment only when the
+      # database has no row for it. Once a row exists -- and a single save in
+      # Admin Settings writes the whole set -- the line here becomes decorative.
+      # It is not overridden loudly. It is never read, and nothing in a log
+      # says so.
+      #
+      # That is not hypothetical. ENABLE_SIGNUP was "true" here and false in the
+      # database, so the login page carried no signup link while this file said
+      # signup was open. DEFAULT_USER_ROLE, ENABLE_RAG_WEB_SEARCH,
+      # ENABLE_OLLAMA_API and the OPENAI_API_* pair are the same class and had
+      # the same standing: declared here, decided elsewhere. The web-search line
+      # argues N1 in its comment, which is a poor thing to leave advisory.
+      #
+      # This makes the file authoritative again -- every PersistentConfig is read
+      # from the environment on every boot.
+      #
+      # THE TRADE: a change made in Admin Settings still applies to the running
+      # process, but no longer survives a restart. Anything that must persist
+      # belongs in this file. For a deployment whose entire update mechanism is
+      # `docker compose up -d`, that is the direction we want -- the same reason
+      # nothing here is :latest.
+      #
+      # REVERSIBLE: delete this line and the database values, still present and
+      # untouched, take over again.
+      ENABLE_PERSISTENT_CONFIG: "false"
+
       # Talks to the gateway by SERVICE NAME over the internal network -- not by
       # IP, not through Caddy. docs/16 section 4.2: platform containers address
       # each other by service name only, because there is no public DNS here.
