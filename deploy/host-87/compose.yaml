@@ -414,6 +414,35 @@ services:
       DEFAULT_USER_ROLE: "user"      # usable immediately, no approval
       ENABLE_LOGIN_FORM: "true"
 
+      # --- What a non-admin can actually use ---------------------------------
+      # Open WebUI filters /api/models by role. For a non-admin it looks each
+      # model up in its own `model` table and DROPS any model with no row there,
+      # before access control is consulted at all. Models served from a
+      # connection -- which is all of ours, they arrive from LiteLLM -- have no
+      # such row until an admin opens Workspace -> Models and saves one.
+      # Confirmed on .87: `select * from model` returned zero rows while chat was
+      # working perfectly well for the admin.
+      #
+      # The result is an empty model picker for every non-admin, with no error
+      # and nothing in a log. Admins skip the filter entirely, so the platform
+      # looks healthy to the one person most likely to check it.
+      #
+      # Bypassing the filter is the right shape here for the same reason signup
+      # is open: the boundary is the network, not a per-object permission list.
+      # It also means a model added to LiteLLM later is usable immediately
+      # instead of waiting for an admin to visit the UI -- per-model database
+      # state that silently fails to cover the NEXT model is precisely the
+      # failure this file already carries one scar from, directly above.
+      #
+      # A plain environment variable, not a PersistentConfig, so it binds
+      # whatever the database holds.
+      #
+      # IF YOU EVER NEED A MODEL RESTRICTED TO A GROUP -- plausible for the M4
+      # deep tier -- this line comes off first. But gating the deep tier on
+      # modelling state is the fleet controller's job (docs/03), not the model
+      # picker's, so that is probably not the reason you would want it.
+      BYPASS_MODEL_ACCESS_CONTROL: "true"
+
       # --- Branding ----------------------------------------------------------
       # The name on the login page, the tab title, and every "ask X" prompt in
       # the UI. Worth setting: people trust a thing that looks like it belongs to
