@@ -1,0 +1,345 @@
+# =============================================================================
+#  .87 -- RAGFLOW SPIKE STACK (M1.5)  --  docs/m1.5-ragflow-spike.md drives this
+# =============================================================================
+#
+#  DRAFT for a ONE-DAY spike (ADR-0007's contingency), not a production stack.
+#  It exists because the main compose's `ragflow:` service is a stub that cannot
+#  start alone -- upstream RAGFlow needs MySQL, Redis, an S3 store and a document
+#  engine, and which of those we keep is exactly what the spike decides. Per the
+#  stub's own OPEN ITEM note: bring this up ALONGSIDE the main stack with
+#  `aiplatform-internal` joined as an external network, then fold the verdict
+#  back into ../compose.yaml.
+#
+#  BRING-UP:    docs/m1.5-ragflow-spike.md, section 3. One service at a time.
+#  TEARDOWN:    docker compose down -v      (removes everything, data included --
+#               it is a spike; the corpus is synthetic and disposable)
+#
+#  EVERY TAG BELOW WAS VERIFIED TO EXIST UPSTREAM ON 2026-09-04 (Docker Hub API,
+#  per-tag). The delivery plan's M6 row records a pinned searxng tag that did
+#  not exist; that mistake is not being repeated here. Notes from verification:
+#    * infiniflow/ragflow:v0.27.1 -- current release (2026-08-28), amd64,
+#      ~3.1 GB compressed. There is NO -slim variant at v0.27.x (v0.27.1-slim
+#      is a 404); slim ended around v0.21. Since v0.22 the full image bundles
+#      NO embedding models either -- embeddings MUST come from our Infinity.
+#    * The datastore images and tags are upstream's own pins at v0.27.1
+#      (docker/docker-compose-base.yml at that git tag), including their
+#      MinIO-compatible replacement image.
+#
+#  SERVICE NAMES ARE LOAD-BEARING. RAGFlow's baked-in config template resolves
+#  its datastores at `mysql`, `redis`, `minio`, `es01` by default. Keeping those
+#  names means no service_conf.yaml.template needs to be vendored or mounted --
+#  one less file to drift from the image. Rename a service and RAGFlow silently
+#  falls back to a host that no longer exists.
+# =============================================================================
+
+name: ragflow-spike
+
+# -----------------------------------------------------------------------------
+#  NETWORKS -- the same egress construction as ../compose.yaml, in miniature
+# -----------------------------------------------------------------------------
+#  N1 applies to a spike exactly as it applies to production, because RAGFlow's
+#  defaults assume the open internet (cloud model providers a user could
+#  configure, Hugging Face fetches, optional OTEL export). Enforcement is
+#  structural, here, not a checklist item:
+#
+#      spike-internal   internal: true  -- RAGFlow + its datastores. No route
+#                                          off-host, no NAT, no public DNS.
+#      aiplatform       external        -- the MAIN stack's internal network,
+#                                          joined so ragflow reaches litellm and
+#                                          infinity-embed BY SERVICE NAME. That
+#                                          network is itself internal: true, so
+#                                          this grants no egress either.
+#      spike-lan        bridge          -- ragflow only, and ONLY because a
+#                                          network with internal: true SILENTLY
+#                                          IGNORES `ports:` (m1-runbook: healthy
+#                                          container, empty PORTS column, curl
+#                                          000 -- cost half of M1). A bridge has
+#                                          a route out, so it is clamped with
+#                                          DOCKER-USER rules on the pinned
+#                                          subnet -- docs/m1.5 section 4.3.
+#                                          Neither half is optional.
+#
+#  The spike procedure VERIFIES the boundary (failed egress probe + drop
+#  counter) before any document is ingested. If you are re-wiring this block,
+#  re-run docs/m1.5 section 4 before ingesting anything.
+# -----------------------------------------------------------------------------
+networks:
+  spike-internal:
+    name: ragflow-spike-internal
+    driver: bridge
+    internal: true          # <- the whole enforcement, in one line
+
+  aiplatform:
+    name: aiplatform-internal
+    external: true          # the main stack must be up first
+
+  spike-lan:
+    name: ragflow-spike-lan
+    driver: bridge
+    ipam:
+      config:
+        # Pinned so the DOCKER-USER clamp is about a known range rather than
+        # whatever Docker allocated this boot. .1 of the main stack's 172.28.9.
+        - subnet: 172.28.10.0/24
+
+# -----------------------------------------------------------------------------
+#  VOLUMES -- named only, so `down -v` returns the host to a plain workstation.
+#  No bind-backed volumes: spike data is synthetic and earns no NVMe placement.
+# -----------------------------------------------------------------------------
+volumes:
+  esdata:
+  mysql_data:
+  minio_data:
+  redis_data:
+  ragflow_logs:
+
+x-logging: &logging
+  # Same belt as the main stack (docs/05 section 5.5): parsing logs are chatty,
+  # and this disk is Postgres's neighbour.
+  logging:
+    driver: json-file
+    options:
+      max-size: "50m"
+      max-file: "3"
+
+services:
+
+  # ===========================================================================
+  #  ELASTICSEARCH -- RAGFlow's default document engine
+  # ===========================================================================
+  #  Upstream also supports an "infinity" doc engine (infiniflow/infinity --
+  #  no relation to our michaelf34/infinity embeddings server, an unfortunate
+  #  name collision). The spike runs the DEFAULT engine: it is the most-tested
+  #  path upstream, and the spike measures RAGFlow's behaviour, not its menu.
+  #  Whether ES stays (vs. the pgvector design of docs/10) is an M5 question
+  #  the verdict feeds -- ADR-0007 already accepts "RAGFlow brings its own
+  #  store".
+  #
+  #  NEEDS vm.max_map_count >= 262144 on the host (docs/m1.5 section 2.4) or it
+  #  exits within seconds.
+  # ===========================================================================
+  es01:
+    image: elasticsearch:8.11.3       # PIN. Upstream's STACK_VERSION at v0.27.1.
+    restart: unless-stopped
+    <<: *logging
+    environment:
+      TZ: ${SPIKE_TZ:-Asia/Kolkata}
+      node.name: es01
+      discovery.type: single-node
+      ELASTIC_PASSWORD: ${RAGFLOW_ES_PASSWORD:?generate one; see .env.example}
+      bootstrap.memory_lock: "false"
+      xpack.security.enabled: "true"
+      xpack.security.http.ssl.enabled: "false"
+      xpack.security.transport.ssl.enabled: "false"
+      cluster.routing.allocation.disk.watermark.low: 5gb
+      cluster.routing.allocation.disk.watermark.high: 3gb
+      cluster.routing.allocation.disk.watermark.flood_stage: 2gb
+    # Spike-sized, not upstream's 8 GB: .87's WSL2 guest is capped and shared
+    # with Postgres, the gateway and everything else that must stay up. If
+    # parsing is slow, that is a finding to record, not a limit to raise here.
+    mem_limit: 4g
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    # NO `ports:`. Internal network -- Docker would silently ignore them anyway
+    # (the m1-runbook trap), and nothing outside this stack has any business
+    # talking to the spike's index. To poke it by hand:
+    #   docker compose exec es01 curl -u elastic:... http://localhost:9200/...
+    networks: [spike-internal]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -u elastic:$${ELASTIC_PASSWORD} http://localhost:9200 >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 60s
+
+  # ===========================================================================
+  #  MYSQL -- RAGFlow's application database
+  # ===========================================================================
+  #  Its OWN MySQL, not the platform's Postgres, for the same reason LiteLLM
+  #  gets its own database: RAGFlow runs its own migrations against a schema it
+  #  owns, and it does not speak Postgres. If the verdict is "adopt", this
+  #  container is part of what gets folded into ../compose.yaml.
+  # ===========================================================================
+  mysql:
+    image: mysql:8.0.40               # PIN. Upstream's pin at v0.27.1.
+    restart: unless-stopped
+    <<: *logging
+    environment:
+      TZ: ${SPIKE_TZ:-Asia/Kolkata}
+      MYSQL_ROOT_PASSWORD: ${RAGFLOW_DB_PASSWORD:?generate one; see .env.example}
+      MYSQL_DATABASE: rag_flow        # the name RAGFlow's template expects
+    command:
+      - --max_connections=1000
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+      - --binlog_expire_logs_seconds=604800
+    volumes:
+      - mysql_data:/var/lib/mysql
+    # NO `ports:` -- internal network; siblings reach it as `mysql:3306`.
+    networks: [spike-internal]
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+
+  # ===========================================================================
+  #  MINIO-COMPATIBLE OBJECT STORE -- raw uploaded files
+  # ===========================================================================
+  #  pgsty/silo is upstream RAGFlow's own pin at v0.27.1 (MinIO's freely
+  #  redistributable images stopped; this is the maintained stand-in their
+  #  stack moved to). Same S3 API, same env vars, same health endpoint.
+  # ===========================================================================
+  minio:
+    image: pgsty/silo:RELEASE.2026-08-06T00-00-00Z   # PIN. Upstream's pin.
+    restart: unless-stopped
+    <<: *logging
+    environment:
+      TZ: ${SPIKE_TZ:-Asia/Kolkata}
+      MINIO_ROOT_USER: ${RAGFLOW_MINIO_USER:-rag_flow}   # RAGFlow's default user name
+      MINIO_ROOT_PASSWORD: ${RAGFLOW_MINIO_PASSWORD:?generate one; see .env.example}
+    command: ["server", "/data", "--console-address", ":9001"]
+    volumes:
+      - minio_data:/data
+    # NO `ports:` -- internal network; siblings reach it as `minio:9000`. The
+    # console on :9001 is likewise unreachable from outside, on purpose.
+    networks: [spike-internal]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9000/minio/health/live || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # ===========================================================================
+  #  REDIS (Valkey) -- RAGFlow's task queue and cache
+  # ===========================================================================
+  redis:
+    image: valkey/valkey:8            # PIN. Upstream's pin at v0.27.1.
+    restart: unless-stopped
+    <<: *logging
+    environment:
+      TZ: ${SPIKE_TZ:-Asia/Kolkata}
+      # For the healthcheck's redis-cli only; the server takes --requirepass.
+      REDISCLI_AUTH: ${RAGFLOW_REDIS_PASSWORD}
+    command:
+      - redis-server
+      - --requirepass
+      - ${RAGFLOW_REDIS_PASSWORD:?generate one; see .env.example}
+      - --maxmemory
+      - "128mb"
+      - --maxmemory-policy
+      - allkeys-lru
+    volumes:
+      - redis_data:/data
+    # NO `ports:` -- internal network; siblings reach it as `redis:6379`.
+    networks: [spike-internal]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  # ===========================================================================
+  #  RAGFLOW -- the thing being judged (ADR-0007, docs/m1.5)
+  # ===========================================================================
+  #  Models come from OUR endpoints, configured through RAGFlow's UI in
+  #  docs/m1.5 section 4.4 -- NOT through environment variables. (The main
+  #  compose's stub sets RAGFLOW_LLM_BASE_URL-style vars; RAGFlow reads no such
+  #  thing. That stub is corrected at fold-back time -- see the procedure's
+  #  section 10.) What the UI is told:
+  #      chat       -> http://litellm:4000/v1        (virtual key, `chat` only)
+  #      embedding  -> http://infinity-embed:7997    (Qwen3-Embedding-0.6B)
+  #  Both by service name over aiplatform-internal, like every other platform
+  #  container -- no IPs, no Caddy, no egress.
+  # ===========================================================================
+  ragflow:
+    image: infiniflow/ragflow:v0.27.1   # PIN. Verified on Docker Hub 2026-09-04;
+    restart: unless-stopped             # v0.27.1-slim does NOT exist -- see the
+    <<: *logging                        # header before "fixing" this to slim.
+    environment:
+      TZ: ${SPIKE_TZ:-Asia/Kolkata}
+      DOC_ENGINE: elasticsearch
+      # Interpolated into the image's baked-in config template by its
+      # entrypoint. Hosts stay at their defaults (mysql / minio / redis / es01)
+      # because the service names above match them.
+      MYSQL_PASSWORD: ${RAGFLOW_DB_PASSWORD}
+      MINIO_USER: ${RAGFLOW_MINIO_USER:-rag_flow}
+      MINIO_PASSWORD: ${RAGFLOW_MINIO_PASSWORD}
+      REDIS_PASSWORD: ${RAGFLOW_REDIS_PASSWORD}
+      ELASTIC_PASSWORD: ${RAGFLOW_ES_PASSWORD}
+      # Belt to the network's brace, and documentation of intent -- same pair
+      # of reasons as everywhere else in this tree. The v0.27 image bundles no
+      # embedding models, and with no route out it could not fetch any: this
+      # makes that failure loud and immediate instead of a mid-ingest hang.
+      HF_HUB_OFFLINE: "1"
+      DO_NOT_TRACK: "true"
+      # OTEL_HOST deliberately absent: unset means no trace export. The spike
+      # procedure greps the running container's env to prove it (s4.1).
+    command:
+      # Upstream's default flags, minus --enable-adminserver (an extra admin
+      # surface the spike does not judge), plus the MCP server -- criterion 3
+      # exists to test it. self-host mode: the MCP server holds ONE user's API
+      # key and answers as that tenant. The key cannot exist before first login,
+      # so it starts as a placeholder and docs/m1.5 section 8.1 recreates the
+      # container with the real one. Until then MCP tool calls 401 -- expected.
+      - --init-model-provider-tables
+      - --enable-mcpserver
+      - --mcp-host=0.0.0.0
+      - --mcp-port=9382
+      - --mcp-base-url=http://127.0.0.1:9380
+      - --mcp-script-path=/ragflow/mcp/server/server.py
+      - --mcp-mode=self-host
+      - --mcp-host-api-key=${RAGFLOW_API_KEY:-ragflow-key-not-minted-yet}
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    volumes:
+      - ragflow_logs:/ragflow/logs
+    ports:
+      # Published for the operator's browser and the MCP client, both used from
+      # .87 itself (localhost needs no firewall rules; the LAN would need the
+      # two-layer recipe in docs/ports.md -- and these ports join that table if
+      # the verdict is adopt).
+      #   9380  API           (ports.md already allocates 9380 to RAGFlow)
+      #   9390  web UI        (container nginx :80; host 80/443 belong to Caddy)
+      #   9382  MCP           (upstream's SVR_MCP_PORT default)
+      - "0.0.0.0:9380:9380"
+      - "0.0.0.0:9390:80"
+      - "0.0.0.0:9382:9382"
+    networks:
+      # THE ONLY SERVICE IN THIS FILE ON MORE THAN ONE NETWORK, and none of the
+      # three has an unclamped route out. `spike-lan` exists solely because
+      # `internal: true` silently ignores `ports:`; it is clamped to the two
+      # internal /24s by the DOCKER-USER rules in docs/m1.5 section 4.3 --
+      # 172.28.10.0/24 must never appear in a capture with a public
+      # destination. A diff that adds `aiplatform-egress` (or any other route
+      # out) to ANY service in this file invalidates the spike's N1 stance.
+      - spike-internal
+      - aiplatform
+      - spike-lan
+    depends_on:
+      es01:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # The nginx front on :80 -- up once migrations and the web server settle.
+      # python, not curl, same as every python-based service in the main stack.
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:80/', timeout=5)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 300s   # first boot runs migrations against a cold MySQL
