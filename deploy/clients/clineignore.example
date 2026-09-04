@@ -1,0 +1,43 @@
+# Copy to the root of the repo you are working on as `.clineignore`.
+# (Roo Code reads the same patterns as `.rooignore`.)
+#
+# Two jobs at once (docs/m3-plan.md §5):
+#   1. Context budget — the workspace listing and every file search shrink,
+#      which matters enormously on a 24k client window.
+#   2. Privacy — secrets must never be read into a prompt. The prompt lives on
+#      in client-side history even though it only ever travels to our gateway.
+#
+# Anything listed here genuinely cannot be read by the agent. If it needs a
+# file you excluded, paste the relevant lines into the chat yourself.
+
+# --- secrets: non-negotiable --------------------------------------------------
+.env
+.env.*
+secrets/
+*.key
+*.pem
+credentials*
+deploy/fleet.local.yaml
+
+# --- bulk that burns the window ----------------------------------------------
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.pyc
+dist/
+build/
+*.log
+
+# --- lockfiles: large, generated, never worth prompt tokens -------------------
+uv.lock
+package-lock.json
+poetry.lock
+
+# --- data and weights ---------------------------------------------------------
+models/
+*.gguf
+*.safetensors
+data/
+outputs/
+documents/

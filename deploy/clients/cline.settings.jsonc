@@ -1,0 +1,78 @@
+// =============================================================================
+//  Cline (VS Code) — settings TRANSCRIPTION SHEET, not a config file.
+//
+//  Cline stores its provider settings in VS Code's internal storage and keeps
+//  the API key in VS Code secret storage. There is NO file Cline reads for
+//  this, so nothing here deploys itself: open the Cline settings panel (the
+//  gear icon in the Cline sidebar) and enter these values by hand.
+//
+//  Format verified 2026-09-04 against docs.cline.bot (provider-config/
+//  openai-compatible and more-info/telemetry). Cline moves fast — if a field
+//  below has no matching UI element, check those pages before improvising.
+//
+//  Placeholders: 10.0.0.87 is the repo's placeholder for the hub. The real
+//  gateway address comes from the operator (it is in deploy/fleet.local.yaml
+//  on the hub, which never leaves the hosts). ${UNDERSTUDY_KEY} stands for
+//  YOUR personal LiteLLM virtual key, issued per docs/m3-plan.md §3 step 5 —
+//  paste the actual sk-... value into the settings panel (it lands in VS Code
+//  secret storage, which is fine). Never put the real key or address in any
+//  file inside a repo.
+// =============================================================================
+{
+  // --- API Configuration (Cline settings panel) ------------------------------
+  // MUST be "OpenAI Compatible". Not "Cline", not "OpenRouter", not any hosted
+  // provider — those route source code off-network and violate N1. Do not sign
+  // in to a Cline account.
+  "apiProvider": "OpenAI Compatible",
+
+  // Real hub address from the operator; keep the /v1 suffix.
+  "openAiBaseUrl": "http://10.0.0.87:4000/v1",
+
+  // Your personal key. One per person; revocable without touching anyone else.
+  "openAiApiKey": "${UNDERSTUDY_KEY}",
+
+  // Exactly the gateway catalog name. While .226's GPU is claimed by the
+  // person at that machine, requests to this model return "model not found" —
+  // that is deliberate (docs/m3-plan.md §6): wait, or use Aider, rather than
+  // letting a small model quietly wreck an agentic session.
+  "openAiModelId": "coder",
+
+  // --- Model Configuration (same panel, under the model) ---------------------
+  // The server window is 32768 (vLLM --max-model-len on .226). The client cap
+  // sits below it so Cline compacts/warns BEFORE the server rejects a request:
+  // 24576 input + 4096 output < 32768. The window is also shared fleet-wide —
+  // one session at 60k tokens would starve every other developer's KV cache.
+  //
+  // KNOWN ISSUE (cline #2073, #6494): some versions ignore this setting for
+  // OpenAI-Compatible providers. Verify against the gateway's prompt_tokens —
+  // if the cap is not honoured, that is the trigger to switch to Roo Code.
+  "contextWindow": 24576,
+  "maxOutputTokens": 4096,
+
+  // Every capability left on costs schema tokens on EVERY request, and the
+  // local model has no vision anyway.
+  "supportsImages": false,
+  "supportsComputerUse": false,
+
+  // --- Privacy (N1) -----------------------------------------------------------
+  // Cline settings panel: "Cline Telemetry" toggle → OFF (PostHog analytics).
+  "clineTelemetry": "off",
+
+  // --- Approvals --------------------------------------------------------------
+  // Start with auto-approve OFF for everything except read-only file access.
+  // Never broadly auto-approve terminal execution against a local model: the
+  // failure mode is a mis-formatted command issued confidently.
+  "autoApprove": "reads-only, add specific commands as trust builds"
+}
+
+// =============================================================================
+//  ALSO REQUIRED — VS Code's own settings.json (Ctrl+Shift+P → "Open User
+//  Settings (JSON)"). Cline's docs state VS Code-level telemetry off disables
+//  Cline's as well; set both regardless:
+//
+//      "telemetry.telemetryLevel": "off"
+//
+//  AND copy clineignore.example (same directory) into each repo you work on
+//  as `.clineignore` — it is both a context-budget control and the thing that
+//  keeps .env files out of prompts.
+// =============================================================================

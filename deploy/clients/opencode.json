@@ -1,0 +1,36 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  "autoupdate": false,
+  "share": "disabled",
+
+  "provider": {
+    "understudy": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Understudy fleet (LiteLLM on .87)",
+      "options": {
+        "baseURL": "http://10.0.0.87:4000/v1",
+        "apiKey": "{env:UNDERSTUDY_KEY}"
+      },
+      "models": {
+        "coder": {
+          "name": "coder — Qwen3-Coder-30B on .226 (gone while the GPU is claimed)",
+          "limit": {
+            "context": 24576,
+            "output": 4096
+          }
+        },
+        "chat": {
+          "name": "chat — largest rung live now; silently degrades to the .87 standby",
+          "limit": {
+            "context": 12288,
+            "output": 4096
+          }
+        }
+      }
+    }
+  },
+
+  "model": "understudy/coder",
+  "small_model": "understudy/chat"
+}
