@@ -30,3 +30,11 @@ node_modules/
 # deploy/fleet.yaml is the committed template with placeholder IPs.
 deploy/fleet.local.yaml
 deploy/host-*/.env
+
+# Eval questions and results -- derived from confidential documents (N1),
+# and this repo pushes to a public remote. The scaffold (eval/README.md,
+# eval/check.py) is committed; the filled set stays on-network. See eval/README.md section 7.
+eval/questions.jsonl
+eval/eval-set-*.jsonl
+eval/corpus-manifest-*
+eval/results/
