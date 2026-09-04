@@ -267,6 +267,12 @@ services:
     environment:
       TZ: ${SPIKE_TZ:-Asia/Kolkata}
       DOC_ENGINE: elasticsearch
+      # REQUIRED, and an upstream footgun: entrypoint.sh starts the API server
+      # and the task executor only when this is "python", "go" or "hybrid" --
+      # UNSET means nginx and MCP come up and answer while NO api server and NO
+      # task executor ever start (login 502s; ingestion would hang). Upstream's
+      # own compose sets it; its nginx default of "python" misleads.
+      API_PROXY_SCHEME: python
       # Interpolated into the image's baked-in config template by its
       # entrypoint. Hosts stay at their defaults (mysql / minio / redis / es01)
       # because the service names above match them.
