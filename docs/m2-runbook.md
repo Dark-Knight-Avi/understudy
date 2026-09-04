@@ -146,3 +146,61 @@ The first four are [`00`](./00-goals-and-constraints.md)'s acceptance tests and
 need a real modelling job, not a synthetic one. Until they run, M2 is proven for
 the *cooperative* path — someone who flips the toggle — and unproven for the
 person who does not.
+
+---
+
+## Field incident — the fleet parked itself for 3½ days (2026-08-31 → 09-04)
+
+Recorded here because every mechanism involved is this runbook's subject, and
+because the controller behaved *correctly* throughout — the outage was blindness,
+not misjudgement.
+
+**Symptom.** Open WebUI returned `400 … no healthy deployments for model=chat`,
+the LiteLLM catalog was empty, and nobody had reported it — the outage was found
+by accident, starting the M1.5 preflight.
+
+**Cause.** A Windows-side NVIDIA driver update (the fleet showed WSL UMD
+`615.65.06` against KMD `616.56` afterwards) revoked GPU access from
+**already-running containers**: inside any container created before the update,
+`nvidia-smi` exits 255 with `Failed to initialize NVML: GPU access blocked by
+the operating system`, while the WSL distro itself and **freshly created**
+containers see the card normally. Processes that already held the device keep
+it — which is why the sleeping standby kept its 1.25 GiB and looked alive.
+
+The chain, reconstructed from logs:
+
+1. `.87`'s fleet-agent (a pre-update container) went NVML-blind: `/gpu` → 503,
+   while `/healthz` — which proves only that uvicorn is alive — stayed 200, so
+   `docker compose ps` showed it **healthy**. `.226`'s agent was unreachable
+   outright (that host's downtime window is not fully explained; its stack was
+   observed freshly restarted during recovery).
+2. Blind on both hosts, the controller did what the sharing guarantee demands:
+   it withdrew every deployment and slept the `.87` standby
+   (`POST /sleep` at 08-31 23:56). Empty catalog, chat down, **no alert** —
+   the dashboard knew, but nothing tells a human.
+3. For 3½ days the loop logged `sample failed` twice per second and nothing
+   else, because nothing else was wrong.
+
+**Recovery** — the part worth rereading, because the controller converged on its
+own once it could see:
+
+- `docker compose up -d --force-recreate fleet-agent` on `.87` → `/gpu` 200s.
+- `--force-recreate vllm-small` (the old one held a slept engine from a blind
+  era). The controller then slept the fresh engine while undecided
+  (`rung=none reason=settled`), decided `rung=chat` for `.226` and
+  `rung=chat-small` for `.87` (`reason=card_clear`), **woke both engines**, and
+  re-registered the catalog without any manual `/model/new`. A gateway
+  completion answered from the 14B minutes later.
+- The `actuate change_rung … no agent base URL` ERRORs during convergence are
+  the unbuilt ladder (see "the honest gap" above) being honestly logged, not a
+  new defect.
+
+**What this adds to the open list:**
+
+| | |
+|---|---|
+| **Driver updates blind old containers** | After any Windows/NVIDIA update: `docker compose up -d --force-recreate` the agent and engines on that host. A container can be `Up (healthy)` and GPU-blind — `/healthz` does not sample the card |
+| **A parked fleet is silent** | Chat was down 3½ days and no one was told. Alerting is scoped for M7; until then, treat "the model picker is empty" reports as this incident first |
+| **`Up (unhealthy)` may mean "parked"** | vllm's compose healthcheck fails while an engine sleeps by design. Check `/is_sleeping` before treating it as broken |
+| **Version skew** | `.226`'s agent ran `0.1.9` under a `0.1.10` controller for 4 days. Harmless this time; pin-bump both together |
+| **`.226` downtime unexplained** | Why its agent was unreachable (stack down? since when?) was never established. Its boot task is documented but was never registered — see `ec781fe` |

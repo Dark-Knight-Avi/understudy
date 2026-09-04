@@ -92,6 +92,7 @@ area, rather than rediscovering it.
 | Chunked prefill turns itself **off** below `max_model_len` 32768, taking the KV cache with it | [`deploy/host-226/compose.yaml`](deploy/host-226/compose.yaml) |
 | Bare `uv run` **uninstalls** anything not in `pyproject.toml`; use `--with` or the Makefile's `--inexact` | `Makefile` |
 | Campus DNS blocks public resolvers, and WSL's stub resolver is unreachable from containers | [`docs/05-host-setup.md`](docs/05-host-setup.md) §5.3 |
+| A Windows driver update **revokes GPU access from running containers** — `nvidia-smi` exits 255 inside them while the host and fresh containers work; the blind agent still reports `healthy` | [`m2-runbook.md`](docs/m2-runbook.md) field incident |
 | Open WebUI decides most settings from the **database**, not the environment — a declared `ENABLE_SIGNUP: "true"` sat inert and silent while the login page showed no signup link | [`deploy/host-87/compose.yaml`](deploy/host-87/compose.yaml) `open-webui` |
 
 ---

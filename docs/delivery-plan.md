@@ -271,7 +271,8 @@ possible to install this on someone else's workstation.
 | Platform slows the modelling runs it lives alongside | Per-iteration time vs the ~48 min baseline | **Untested.** The don't-disturb check must run before anyone else uses the platform: it is the question that decides whether this stays installed |
 | `.210` approval refused | M0 | Drop to two hosts; image gen time-shares `.226` |
 | Deep tier starves modelling runs | M0 spike 7 | Off-hours only, or no deep tier |
-| Driver drift across hosts | `nvidia-smi` version per host | `.87` is on 615, `.226` still a generation back. It works; close it before M4 |
+| Driver drift across hosts | `nvidia-smi` version per host | `.87` is on 615, `.226` still a generation back. It works; close it before M4. **And it drifts by itself:** Windows updated `.87`'s KMD to 616 unattended on ~08-31 |
+| **A host update blinds the agents; the controller parks the fleet; nobody is told** | Empty model picker in the WebUI; agent `/gpu` returning 503; `sample failed` filling the controller log | **Happened 08-31 → 09-04: chat down 3½ days, found by accident.** The controller was *right* to park (sharing outranks availability) — the failures were the silent kind: containers that predate a driver update go NVML-blind while reporting healthy. Fix: `--force-recreate` agents and engines after any Windows/driver update; the controller re-converges alone. Alerting is the M7 item this proves urgent. See the m2-runbook field incident |
 | Secrets exposed in transcripts or chat | Any key pasted outside `.env` | One rotation pass covering the host passwords, both vLLM keys, the Postgres password and the LiteLLM master/salt keys. Outstanding since M1 |
 | Cline burns the context window | M3 | Roo Code, or Aider's diff-based flow |
 | Retrieval quality disappoints | M5 recall@5 | Chunking strategy first, then rerank depth, then model |
