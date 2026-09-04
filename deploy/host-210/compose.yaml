@@ -94,7 +94,7 @@ services:
   #  repo-root .env.example.
   # ===========================================================================
   infinity-embed:
-    image: michaelf34/infinity:0.0.76   # PIN, same tag as .87. This host
+    image: michaelf34/infinity:0.0.77   # PIN, same tag as .87. This host
     restart: unless-stopped                   # reports CUDA 13.1; confirm the
     <<: *logging                              # image's CUDA line matches before
                                               # pulling it.

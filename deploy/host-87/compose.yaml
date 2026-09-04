@@ -556,7 +556,7 @@ services:
   #  costs them a day. The CPU fallback is what makes that trade acceptable.
   # ===========================================================================
   infinity-embed:
-    image: michaelf34/infinity:0.0.76   # PIN, and match the host's CUDA
+    image: michaelf34/infinity:0.0.77   # PIN, and match the host's CUDA
     restart: unless-stopped                   # line (12.6 on .87).
     <<: [*gpu, *logging]
     command:
@@ -597,7 +597,7 @@ services:
       start_period: 120s    # first start pulls the model into VRAM
 
   infinity-rerank:
-    image: michaelf34/infinity:0.0.76
+    image: michaelf34/infinity:0.0.77
     restart: unless-stopped
     <<: *logging
     # NO gpu block, on purpose (docs/03 section 5). .87's 12 GB cannot hold the
