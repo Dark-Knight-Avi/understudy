@@ -284,13 +284,17 @@ services:
       # OTEL_HOST deliberately absent: unset means no trace export. The spike
       # procedure greps the running container's env to prove it (s4.1).
     command:
-      # Upstream's default flags, minus --enable-adminserver (an extra admin
-      # surface the spike does not judge), plus the MCP server -- criterion 3
-      # exists to test it. self-host mode: the MCP server holds ONE user's API
-      # key and answers as that tenant. The key cannot exist before first login,
-      # so it starts as a placeholder and docs/m1.5 section 8.1 recreates the
-      # container with the real one. Until then MCP tool calls 401 -- expected.
-      - --init-model-provider-tables
+      # NOT upstream's defaults plus extras, as an earlier draft claimed:
+      # --init-model-provider-tables is a ONE-SHOT (migrate, then exit) in
+      # entrypoint.sh, and having it here meant the API server never started --
+      # nginx answered 200 while every API call 502'd. Found on first boot.
+      # Run the init separately if the provider catalog comes up empty:
+      #   docker compose --env-file .env run --rm ragflow --init-model-provider-tables
+      # The MCP server is on because criterion 3 exists to test it. self-host
+      # mode: it holds ONE user's API key and answers as that tenant. The key
+      # cannot exist before first login, so it starts as a placeholder and
+      # docs/m1.5 section 8.1 recreates the container with the real one. Until
+      # then MCP tool calls 401 -- expected.
       - --enable-mcpserver
       - --mcp-host=0.0.0.0
       - --mcp-port=9382
